@@ -1,0 +1,15 @@
+{:cljdoc.doc/tree
+ [["Readme" {:file "README.md"}]
+  ["Islands" {:file "doc/islands.md"}]
+  ["Reading from outside the page" {:file "doc/reading.md"}]
+  ["Actions" {:file "doc/actions.md"}]
+  ["State the browser owns" {:file "doc/browser-state.md"}]
+  ["State shared on the server" {:file "doc/shared-state.md"}]
+  ["Scripts the page needs" {:file "doc/scripts.md"}]
+  ["Files from the browser" {:file "doc/uploads.md"}]
+  ["Testing islands" {:file "doc/testing.md"}]
+  ["Serving pages" {:file "doc/serving.md"}]
+  ["Security" {:file "doc/security.md"}]
+  ["How it works" {:file "doc/how-it-works.md"}]
+  ["Design notes" {:file "doc/design.md"}]
+  ["Changelog" {:file "CHANGELOG.md"}]]}

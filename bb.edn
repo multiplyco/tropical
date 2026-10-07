@@ -1,0 +1,112 @@
+{:tasks
+ {compile:java    {:doc  "Compile the Java sources in src (requires JDK 25+)"
+                   :task (shell "clj -T:build compile-java")}
+
+  native:zstd     {:doc  "Build the libzstd tropical ships from zstd's release source (on macOS, with Docker for Linux)"
+                   :task (shell "native/build-zstd.sh")}
+
+  native:brotli   {:doc  "Build tropical's libbrotlienc from brotli's release source (on macOS, with Docker for Linux)"
+                   :task (shell "native/build-brotli.sh")}
+
+  dev             {:doc     "Compile the Java sources, then start the demo page with nREPL and Remontoire"
+                   :depends [compile:java]
+                   :task    (shell "clj" "-M:dev"
+                              "-e" "(user/start!)"
+                              "-m" "nrepl.cmdline"
+                              "--middleware" "[cider.nrepl/cider-middleware]"
+                              "--interactive")}
+
+  dev:readable    {:doc     "As dev, with the app's names readable in the browser: island ids, state signals, script URLs"
+                   :depends [compile:java]
+                   :task    (shell "clj" "-M:dev:readable"
+                              "-e" "(user/start!)"
+                              "-m" "nrepl.cmdline"
+                              "--middleware" "[cider.nrepl/cider-middleware]"
+                              "--interactive")}
+
+  test            {:doc     "Run tests"
+                   :depends [compile:java]
+                   :task    (apply shell "clj" "-M:test" *command-line-args*)}
+
+  test:linux      {:doc      "Run tests in Linux, under JDK 25 in Docker: amd64 (default), arm64, amd64-musl, arm64-musl, all"
+                   :depends  [compile:java]
+                   :requires ([clojure.string :as str])
+                   ;; The repository is mounted read-only, the classes compiled
+                   ;; here; the dependencies are kept in a volume of their own,
+                   ;; downloaded on the first run. Kaocha's options follow `--`.
+                   :task     (let [[targets more] (split-with (fn [arg] (not= "--" arg)) *command-line-args*)
+                                   all     ["amd64" "arm64" "amd64-musl" "arm64-musl"]
+                                   targets (cond (empty? targets) ["amd64"]
+                                             (= ["all"] targets) all
+                                             :else targets)
+                                   failed  (doall
+                                             (for [target targets
+                                                   :let [[arch libc] (str/split target (re-pattern "-"))
+                                                         image (str "clojure:temurin-25-tools-deps-"
+                                                                 (if (= "musl" libc) "alpine" "trixie-slim"))]]
+                                               (if-not (some #{target} all)
+                                                 (do (println "Unknown target" target "- one of" (str/join ", " all) "or all")
+                                                   target)
+                                                 (do (println "==" target (str "(" image ")"))
+                                                   (when-not (zero? (:exit (apply shell {:continue true}
+                                                                             "docker" "run" "--rm" "--platform" (str "linux/" arch)
+                                                                             "-v" (str (System/getProperty "user.dir") ":/tropical:ro")
+                                                                             "-v" "tropical-test-m2:/root/.m2"
+                                                                             "-e" "CLJ_CACHE=/tmp/cpcache"
+                                                                             "-w" "/tropical" image
+                                                                             "clojure" "-M:test" (rest more))))
+                                                     target)))))
+                                   failed  (remove nil? failed)]
+                               (when (seq failed)
+                                 (println "Failed:" (str/join ", " failed))
+                                 (System/exit 1)))}
+
+  build           {:doc  "Build library JAR"
+                   :task (shell "clj -T:build jar")}
+
+  install         {:doc  "Install JAR to local Maven repo"
+                   :task (shell "clj -T:build install")}
+
+  tag             {:doc  "Create and push version tag"
+                   :task (shell "clj -T:build tag")}
+
+  version:check   {:doc  "Check the version in build.clj is reflected in the docs and the plugin"
+                   :task (let [version (second (re-find (re-pattern "\\(def version \"([^\"]+)\"\\)") (slurp "build.clj")))
+                               coord   (re-pattern (str "co\\.multiply/tropical \\{:mvn/version \"" version "\"\\}"))
+                               sources {"README.md"                                   coord
+                                        "CHANGELOG.md"                                (re-pattern (str "## " version " "))
+                                        "plugins/tropical/.claude-plugin/plugin.json" (re-pattern (str "\"version\"\\s*:\\s*\"" version "\""))
+                                        "plugins/tropical/skills/tropical/SKILL.md"   coord}
+                               stale   (remove (fn [[f re]] (re-find re (slurp f))) sources)]
+                           (if (seq stale)
+                             (do (println "Version" version "(build.clj) is not reflected in:")
+                               (doseq [[f _] stale] (println "  -" f))
+                               (System/exit 1))
+                             (println "Version" version "in sync.")))}
+
+  deploy          {:doc     "Tag, push, and deploy to Clojars"
+                   :depends [version:check]
+                   :task    (do (shell "clj -T:build tag")
+                              (shell "clj -T:build deploy"))}
+
+  cljdoc          {:doc     "Test cljdoc analysis locally"
+                   :depends [build]
+                   :task    (let [v (clojure.string/trim (:out (shell {:out :string} "clj -T:build version-str")))]
+                              (shell "clj -M:cljdoc"
+                                (format "{:project \"co.multiply/tropical\" :version \"%s\" :jarpath \"target/tropical-%s.jar\" :pompath \"target/classes/META-INF/maven/co.multiply/tropical/pom.xml\"}"
+                                  v v)))}
+
+  warn:reflection {:doc     "Check the library for reflection and performance warnings"
+                   :depends [compile:java]
+                   :task    (shell "clj" "-M"
+                              "-e" "(set! *warn-on-reflection* true)"
+                              "-e" "(require 'co.multiply.tropical.ring 'co.multiply.tropical.hooks)")}
+
+  lint            {:doc  "Lint with clj-kondo, under the config the library exports"
+                   :task (shell "clj-kondo --lint src test dev")}
+
+  format:check    {:doc  "Check code formatting"
+                   :task (shell "cljstyle check")}
+
+  format:fix      {:doc  "Fix code formatting"
+                   :task (shell "cljstyle fix")}}}

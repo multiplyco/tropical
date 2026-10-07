@@ -1,0 +1,6 @@
+;; clj-kondo's config for code using tropical, shipped in the jar. An app imports
+;; it with `clj-kondo --lint "$(clojure -Spath)" --dependencies --copy-configs`.
+;;
+;; `defisland` reads as `defn`: a name, an optional docstring, an optional map
+;; (`defisland`'s options, `defn`'s attr map), then params and body.
+{:lint-as {co.multiply.tropical.island/defisland clojure.core/defn}}

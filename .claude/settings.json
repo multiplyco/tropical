@@ -1,0 +1,13 @@
+{
+  "enabledPlugins": {
+    "quiescent@quiescent": true
+  },
+  "extraKnownMarketplaces": {
+    "quiescent": {
+      "source": {
+        "source": "github",
+        "repo": "multiplyco/quiescent"
+      }
+    }
+  }
+}

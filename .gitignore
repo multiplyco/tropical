@@ -1,0 +1,15 @@
+*.log
+.clj-kondo/.cache/
+.cpcache/
+.DS_Store
+.idea
+*.iml
+.lsp/*.out
+.lsp/.cache/
+.nrepl-port
+.socket-repl-port
+classes/
+target/
+
+# The maintainers' own planning: the backlog and a first app's requirements.
+plans/

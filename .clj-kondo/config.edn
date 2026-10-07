@@ -1,0 +1,2 @@
+;; The repo lints with the config it exports.
+{:config-paths ["../resources/clj-kondo.exports/co.multiply/tropical"]}

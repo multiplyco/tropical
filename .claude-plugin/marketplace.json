@@ -1,0 +1,15 @@
+{
+  "name": "tropical",
+  "description": "Claude Code plugin for co.multiply/tropical — server-rendered islands for Datastar.",
+  "owner": {
+    "name": "Multiply",
+    "url": "https://github.com/multiplyco"
+  },
+  "plugins": [
+    {
+      "name": "tropical",
+      "source": "./plugins/tropical",
+      "description": "Server-rendered islands for Datastar with co.multiply.tropical: defisland, hooks, observe, actions, browser and shared state, mounting, testing."
+    }
+  ]
+}
