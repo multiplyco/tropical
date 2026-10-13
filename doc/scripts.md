@@ -25,7 +25,8 @@ Some of a page has to run in the browser: an outline that follows the reader as 
   that leaves them out still gets them over the stream, a little later.
   One that renders them without the nonce breaks them: a module blocked once stays failed for the page.
 - **Don't draw into the island.** The island's next render matches its elements' children to the server's, undoing
-  what a script put there. A web component draws into its shadow root, which the morph doesn't reach.
+  what a script put there. A web component draws into its shadow root, which the morph doesn't reach. One made with
+  Datastar's Rocket loads this way too ([Components with Rocket](rocket.md)).
 - **A page keeps what it loaded.** An edited script gets a new URL, but `customElements.define` won't redefine a name,
   so an edited component shows on the next page load. In development, a script whose resource is a file is read again
   when the file changes.

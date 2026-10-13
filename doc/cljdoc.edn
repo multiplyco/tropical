@@ -6,6 +6,7 @@
   ["State the browser owns" {:file "doc/browser-state.md"}]
   ["State shared on the server" {:file "doc/shared-state.md"}]
   ["Scripts the page needs" {:file "doc/scripts.md"}]
+  ["Components with Rocket" {:file "doc/rocket.md"}]
   ["Files from the browser" {:file "doc/uploads.md"}]
   ["Testing islands" {:file "doc/testing.md"}]
   ["Serving pages" {:file "doc/serving.md"}]

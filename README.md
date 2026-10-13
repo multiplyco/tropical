@@ -115,6 +115,7 @@ sends that one island.
 - [State the browser owns](doc/browser-state.md): cookie and storage states, and the `ui` helpers.
 - [State shared on the server](doc/shared-state.md): state across sessions, held while read.
 - [Scripts the page needs](doc/scripts.md): ES modules, loaded once, for the islands that need them.
+- [Components with Rocket](doc/rocket.md): web components made with Datastar's Rocket, their props, events and state.
 - [Files from the browser](doc/uploads.md): uploads straight to the app's storage, and drop areas.
 - [Testing islands](doc/testing.md): rendering islands and invoking their actions in a test.
 - [Serving pages](doc/serving.md): the app map, the page, compression, running it.

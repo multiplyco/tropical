@@ -16,6 +16,9 @@
                       the clicked term as a value (`use-action`'s `:value`).
                       The definition is an island keyed by its term, which
                       starts over when another is picked.
+  - `rating-card`:    a web component made with Datastar's Rocket,
+                      `<star-rating>`: the island renders its props and takes
+                      its events, and it keeps what only the browser changes.
   - `drafts-card`:    proposals reworked in a dialog, whose drafts the browser
                       keeps in its storage (`co.multiply.tropical.storage`),
                       through closing it, a reload and a server restart. Each
@@ -543,6 +546,55 @@
        [:p {:class muted} "Click a term."])]))
 
 
+;; Rocket -----------------------------------------------------------------------
+
+
+(defscript star-rating
+  "`<star-rating>`: the ratings, as a Rocket component. It imports Rocket from
+  `datastar`, the bundle the page's import map names."
+  {:resource "demo/star_rating.js"})
+
+
+(defn- rating-props
+  "`<star-rating>`'s props, from every user's `ratings`, for `uid`."
+  [ratings uid]
+  (let [votes (vals ratings)]
+    {:average (if (seq votes) (/ (double (reduce + votes)) (count votes)) 0)
+     :votes   (count votes)
+     :mine    (get ratings uid 0)
+     :counts  (ui/json (for [n (range 1 6)] (count (filter #{n} votes))))}))
+
+
+(defisland rating-card
+  "Ratings drawn by a Rocket component, `<star-rating>`, whose props the island
+  renders from every user's ratings: a rating patches every tab's. The
+  component keeps the star under the pointer, and whether its breakdown is
+  open, in signals of its own, which the patch leaves alone. A click is its
+  `rate` event, which the island takes as an action's value. The label is the
+  island's, an action included, in the component's children."
+  [uid]
+  (let [ratings (use-watch state/!ratings)
+        mine    (get ratings uid)
+        rate    (use-action :rate
+                  (fn [_ {stars "stars"}]
+                    (state/rate! uid stars)
+                    nil)
+                  {:value "evt.detail"})
+        clear   (use-action :clear (fn [_] (state/unrate! uid) nil))]
+    (script/use star-rating)
+    [:section {:class card}
+     (heading "A Rocket component"
+       "A web component made with Datastar's Rocket. The island renders its props and takes its events; it keeps "
+       "what only the browser changes. Open the breakdown, then rate in another tab: the props change, and it stays "
+       "open.")
+     [:star-rating (assoc (rating-props ratings uid) :data-on:rate rate)
+      [:span {:class muted}
+       (if mine
+         (list "You rated it " mine ". Click a star to change it, or "
+           [:button {:type "button" :class (conj link :cursor-pointer) :data-on:click clear} "clear it"] ".")
+         "Rate the demo.")]]]))
+
+
 ;; Drafts -----------------------------------------------------------------------
 
 
@@ -833,6 +885,7 @@
        (vault-card uid)]
       (resources-card)
       (glossary-card)
+      (rating-card uid)
       (drafts-card uid)
       (uploads-card)
       (when (or (seq uploads) (seq batches))
@@ -969,8 +1022,15 @@
 
 
 (def ^:private datastar-url
-  ;; The client tropical is tested against. CSP mode needs 1.0.3 or later.
-  "https://cdn.jsdelivr.net/gh/starfederation/datastar@v1.0.4/bundles/datastar.js")
+  ;; The client tropical is tested against, with Rocket: the bundle holds both.
+  ;; CSP mode needs 1.0.3 or later.
+  "https://cdn.jsdelivr.net/gh/starfederation/datastar@v1.0.4/bundles/datastar-rocket.js")
+
+
+(def ^:private import-map
+  ;; Modules import Datastar, and Rocket, as `datastar`: the page's own copy, as
+  ;; a second would be a second engine.
+  (ui/json {:imports {:datastar datastar-url}}))
 
 
 (defn shell
@@ -988,6 +1048,8 @@
        [:meta {:name "viewport" :content "width=device-width, initial-scale=1"}]
        [:title "Tropical"]
        [:script {:nonce nonce :src "https://unpkg.com/@tailwindcss/browser@4"}]
+       ;; Before the first module.
+       [:script {:nonce nonce :type "importmap"} (h/raw import-map)]
        [:script {:nonce nonce :type "module" :src datastar-url}]
        ;; The scripts the first frame's islands declared.
        (ring/scripts nonce)]

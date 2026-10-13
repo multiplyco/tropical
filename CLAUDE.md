@@ -29,9 +29,10 @@ The wire is Datastar's SDK specification (`sdk/ADR.md` in the Datastar repositor
 - `README.md`: what the library is, an example, the model, and the index of the guides. Keep it short: the detail
   goes in a guide.
 - `doc/*.md` other than the two below: the guides, one per subject (`islands`, `reading`, `actions`, `browser-state`,
-  `shared-state`, `scripts`, `uploads`, `testing`, `serving`, `security`, `how-it-works`, `development`). A change to
-  what an app writes goes in its guide, and one to what it trusts, in `security` too. `doc/cljdoc.edn` lists the
-  pages cljdoc publishes, in order: add a new guide there and to the README's index.
+  `shared-state`, `scripts`, `rocket`, `uploads`, `testing`, `serving`, `security`, `how-it-works`, `development`). A
+  change to what an app writes goes in its guide, and one to what it trusts, in `security` too. `doc/cljdoc.edn` lists
+  the pages cljdoc publishes, in order: add a new guide there and to the README's index. `rocket` follows the demo's
+  `<star-rating>`: check both against a new Datastar release.
 - `doc/design.md`: why it is built this way, and the alternatives rejected. Fold settled decisions in here.
 - `doc/logbook.md`: dated records (measurements with how they were taken, smoke-test findings, things that looked like
   bugs and weren't), oldest first. Append; don't rewrite history.

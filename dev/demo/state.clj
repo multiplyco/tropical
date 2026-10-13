@@ -154,3 +154,22 @@
       (let [n (swap! !message-n inc)]
         (swap! !messages #(vec (take-last max-messages (conj % {:n n :uid uid :text text :at (System/currentTimeMillis)})))))
       true)))
+
+
+;; uid -> the stars they rated the demo, from 1 to 5.
+(defonce !ratings (atom {}))
+
+
+(defn rate!
+  "Records `uid`'s rating, `stars`, which arrived from the browser and is
+  untrusted: a whole number from 1 to 5, or nothing. Returns true if recorded."
+  [uid stars]
+  (when (contains? #{1 2 3 4 5} stars)
+    (swap! !ratings assoc uid stars)
+    true))
+
+
+(defn unrate!
+  "Drops `uid`'s rating."
+  [uid]
+  (swap! !ratings dissoc uid))

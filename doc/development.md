@@ -82,3 +82,7 @@ session.
    value and drops it; Dismiss drops it while the dialog is closed. "Start, then open alpha" opens alpha's page, which
    tells of it in a toast, and drops the draft before that page loads: back on `/`, the dialog shows the proposal as
    it was.
+19. **Rate.** The stars in the Rocket card are a web component made with Datastar's Rocket, `<star-rating>`. Open its
+   breakdown, then rate in another tab: every tab's props change as the island is patched, and the breakdown stays
+   open, a signal of the component's own. "Clear it" is the island's action, in the component's children
+   ([Components with Rocket](rocket.md)).

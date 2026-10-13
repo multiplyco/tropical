@@ -210,6 +210,15 @@ plain function returning hiccup, called inside islands.
 - **Scripts** are ES modules declared with `defscript` and taken up with `(script/use s)` in the islands that need
   them. The page loads each once, from the first frame that has it. An edited component shows after a page load,
   since `customElements.define` won't redefine a name.
+- **Rocket components** (Datastar's `rocket(...)`) are scripts like any other, and elements whose props the island
+  renders as attributes and whose events it takes with `use-action`'s `{:value "evt.detail"}`. The page loads
+  `datastar-rocket.js` in place of `datastar.js`, never both, and components import `rocket` from that copy: name it
+  in an import map, before the first module, with the nonce. Keep the default shadow-root mode: in `light` mode, the
+  island's morph removes what the component drew, and the component undoes the island's children. A prop the
+  component sets is reset by the island's next render; state it owns goes in its `$$` signals, which a patch leaves,
+  but which start over when the element is moved or replaced. Rocket routes every `@action(...)` in the island's
+  children through the component, which passes on those it doesn't define. Never put a server value in a `js`-codec
+  prop: it becomes code. The guide: `doc/rocket.md`.
 - **Uploads** (`co.multiply.tropical.upload`) send a file's bytes from the browser straight to the app's storage,
   such as presigned PUTs: `use-uploads` asks the app where each file goes and keeps the list for the island.
   `(upload/drop-area attrs start)` makes an element a drop area, the innermost under the pointer taking a drag.
