@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.1 - 2026-10-13
+
+- The docs say when `:stream-max-ms` keeps stickiness from lapsing: when each request extends the cookie's life. A
+  balancer can count that life from when it first set the cookie, even while setting it again on every response, and
+  then it lapses under a tab in use too, which only a long life helps.
+
 ## 0.4.0 - 2026-10-13
 
 - An action that reaches a server that doesn't hold its tab's session, as when a balancer's stickiness lapsed while

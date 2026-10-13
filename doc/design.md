@@ -214,7 +214,8 @@ Atoms remain the user-facing state: `RefSignal` gives each atom one watch, howev
   what the first server held in memory, which is why stickiness that lasts matters more than this.
 - **Streams can end at an age, for stickiness that lapses.** `:stream-max-ms` ends each stream after that long, and
   Datastar reconnects it at once to the same session, as the same page load. The reconnect passes the balancer while
-  the tab is open, so a cookie renewed on each response doesn't lapse under it. Its last event id says the page has
+  the tab is open, so a cookie whose life each request extends doesn't lapse under it. One whose life counts from
+  when it was set lapses under a tab in use too, which no reconnect helps. Its last event id says the page has
   what it was sent, so it gets only what changed since: usually little, so the page isn't patched as a whole, and a
   field not bound to a signal isn't touched. Off by default: it costs each open tab a reconnect per period, which
   stickiness that lasts as long as a tab doesn't need, and which is the better fix where it can be had.

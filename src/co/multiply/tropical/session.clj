@@ -45,7 +45,8 @@
                       For a balancer whose stickiness lapses, such as a
                       cookie that lasts ten minutes: set under that, each
                       reconnect passes the balancer while the tab is open,
-                      and renews it if the balancer renews on each response.
+                      and renews it if each request extends the cookie's
+                      life, not if its life counts from when it was set.
                       A stream ends at a random point in the last tenth of
                       it, so streams opened together don't reconnect
                       together.

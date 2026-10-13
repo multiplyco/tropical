@@ -236,7 +236,9 @@ until the response ends. The page and the actions are left to the server's compr
   goes elsewhere, which costs that click. Stickiness that lasts as long as a tab may stay open, hours, is the fix.
   Where it can't, `:stream-max-ms` ends each stream after that long, and Datastar reconnects it at once, through the
   balancer, to the same session, which sends only what changed meanwhile, as the page has the rest. Set under the
-  stickiness's life, it keeps an open tab on its server, if the balancer renews its cookie on each response.
+  stickiness's life, it keeps an open tab on its server, if each request extends that life. A balancer can count it
+  from when it first set the cookie instead, even while setting the cookie again on every response. Then no request
+  extends it, so it lapses under a tab in use too, and only a long life helps.
 - **Heartbeats.** A dead connection is only noticed on write, so a quiet stream writes a heartbeat every 10 s
   (`session/heartbeat-ms`): an SSE comment, which the client ignores, and which keeps the idle timeouts of proxies
   along the way from closing it.
