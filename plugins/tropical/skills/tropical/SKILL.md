@@ -16,7 +16,7 @@ its islands, functions returning hiccup, and sends what changed over one SSE str
 by element id. Writes come back as actions: closures rendered into the page as tokens, posted with Datastar's signals.
 
 **Repository**: https://github.com/multiplyco/tropical —
-`co.multiply/tropical {:mvn/version "0.3.0"}`, JDK 25+, Clojure 1.12+, Datastar 1.0.4 in the browser.
+`co.multiply/tropical {:mvn/version "0.4.0"}`, JDK 25+, Clojure 1.12+, Datastar 1.0.4 in the browser.
 
 This file covers what you can't infer: where a reasonable guess from React, Electric, htmx or a Datastar server SDK is
 wrong. It is not an API reference. The app-facing vars and namespaces carry thorough docstrings, so for signatures and
@@ -280,7 +280,13 @@ plain function returning hiccup, called inside islands.
   attribute off when there is no nonce; an empty one breaks Datastar.
 - **Reloading code in development:** make `(session/close-all!)` the last step of the reload. Open sessions keep
   rendering with the code they started with until then.
-- **Sticky sessions** behind a balancer: a tab's stream and its actions must reach the server holding its session.
+- **Sticky sessions** behind a balancer: a tab's stream and its actions must reach the server holding its session. An
+  action that reaches another server makes the page reopen its stream there, which rebuilds the tab; the page keeps
+  its signals, and the click is dropped. Tell the user: `data-on:tropical:reopen__window` fires for a dropped action
+  only; show a notice by a signal. A rebuild keeps the browser's state, not the first server's memory (`use-state`,
+  in-memory shared state, the app's own). Stickiness with a fixed life lapses under an idle tab: make it last hours,
+  or set `:stream-max-ms` under it. A script posting with `use-token` dispatches `tropical:reopen` on `window` when the
+  answer has a `Tropical-Reopen` header.
 
 ## Testing islands
 

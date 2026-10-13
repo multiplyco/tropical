@@ -985,14 +985,21 @@
 
 
 (def ^:private wire-signals
-  "{_wire: {frames: 0, total: 0, last: 0, page: 0, patched: '', renders: ''}}")
+  "{_wire: {frames: 0, total: 0, last: 0, page: 0, patched: '', renders: ''}, _dropped: false}")
 
 
 (defn- wire-footer
   []
   [:footer {:class [:fixed :inset-x-0 :bottom-0 :border-t :border-zinc-200 "bg-white/90" :px-6 :py-2 :font-mono
-                    :text-xs :backdrop-blur :dark:border-zinc-800 "dark:bg-zinc-950/90"]}
+                    :text-xs :backdrop-blur :dark:border-zinc-800 "dark:bg-zinc-950/90"]
+            ;; An action that reached a server without this tab's session was
+            ;; dropped, and the stream reopened there: say so. A signal shows
+            ;; it, since the stream's rebuild of the page keeps signals.
+            :data-on:tropical:reopen__window "$_dropped = true"}
    [:div {:class [:mx-auto :max-w-4xl :space-y-1]}
+    [:div {:data-show "$_dropped" :style "display: none" :class [:text-amber-700 :dark:text-amber-400]}
+     "That didn't go through: the page reconnected. Try again. "
+     [:button {:class [:underline] :data-on:click "$_dropped = false"} "Dismiss"]]
     [:div
      "frames " [:span {:data-text "$_wire.frames"}]
      " · last frame " [:span {:data-text "$_wire.last"}] " chars"

@@ -49,6 +49,7 @@ The keys, with the details in the docstrings of `co.multiply.tropical.ring` and 
 | `:first-frame-ms`    | how long a session's first frame may wait for reads still pending; 0 by default               |
 | `:compression`       | the encodings to compress the stream with, in order of preference; none by default             |
 | `:max-signals-bytes` | the largest action body read; 1 MiB by default                                                 |
+| `:stream-max-ms`     | how long a stream stays open before it reconnects, for stickiness that lapses; off by default  |
 
 ## Mounting it
 
@@ -220,16 +221,29 @@ until the response ends. The page and the actions are left to the server's compr
 
 - **A tab's requests go to one server.** A session lives in the memory of the server that created it, and a tab's
   stream and its actions must reach that server: behind a load balancer, keep a tab on one server, as sticky sessions
-  do. An action that reaches another server gets a 404, and changes nothing. A stream that reaches another server, as
-  after a deploy, rebuilds the tab there from its route. Signing a user out closes their sessions on every server
-  ([Security](security.md#sessions-and-authentication)).
+  do. A stream that reaches another server, as after a deploy, rebuilds the tab there from its route. An action that
+  reaches another server can't run there, so the page reopens its stream, which the balancer sends where it sent the
+  action, and that server rebuilds the tab. The page updates in place and keeps what the browser holds, such as what
+  was typed into a field bound to a signal, and the click is dropped: the page's `tropical:reopen` event lets the app
+  say so ([Actions](actions.md)). Each reopen logs a warning, which counts how often it happens. Signing a user out
+  closes their sessions on every server ([Security](security.md#sessions-and-authentication)).
+- **What a rebuild keeps.** The browser's state: signals, cookies and storage ([Browser state](browser-state.md)). Not
+  what the first server held in memory: islands' `use-state`, shared state kept in memory, and whatever the app keeps
+  per server. A rebuild recovers the tab, not that, which is why keeping a tab on one server matters more than
+  recovering it.
+- **Stickiness that lapses.** A tab whose stream stays open on one server makes no other request while it sits idle,
+  so stickiness that lasts a fixed time, such as a cookie good for ten minutes, can lapse under it, and its next click
+  goes elsewhere, which costs that click. Stickiness that lasts as long as a tab may stay open, hours, is the fix.
+  Where it can't, `:stream-max-ms` ends each stream after that long, and Datastar reconnects it at once, through the
+  balancer, to the same session, which sends only what changed meanwhile, as the page has the rest. Set under the
+  stickiness's life, it keeps an open tab on its server, if the balancer renews its cookie on each response.
 - **Heartbeats.** A dead connection is only noticed on write, so a quiet stream writes a heartbeat every 10 s
   (`session/heartbeat-ms`): an SSE comment, which the client ignores, and which keeps the idle timeouts of proxies
   along the way from closing it.
 - **Hidden tabs.** Datastar closes a hidden tab's stream and opens it again when the tab is shown. Its session keeps
-  its islands, and what they hold, for 15 s (`session/grace-ms`), then lets go of them; a tab shown after that gets a
-  fresh session. `:open-when-hidden true` in the app keeps the stream open while hidden, for browser automation in
-  development.
+  its islands, and what they hold, for 15 s (`session/grace-ms`), then lets go of them. A tab shown within that gets
+  what changed while it was hidden; one shown after it gets a fresh session. `:open-when-hidden true` in the app keeps
+  the stream open while hidden, for browser automation in development.
 - **Memory per tab.** A session keeps its islands' last output, about 1.3 KB per island, and its stream's encoder, if
   compressed.
 

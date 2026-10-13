@@ -7,9 +7,11 @@
   and the session belongs to that page load from then on. Datastar drops that
   stream routinely: a hidden tab closes it, network blips retry it.
   A detached session keeps its islands, and so their resources, for `grace-ms`.
-  A reconnect within that window resyncs from the cached frame without
-  reopening anything. After the window, every island is unmounted and
-  everything they held is released.
+  A reconnect within that window gets what the page lacks, without reopening
+  anything: what changed since, if the last event id it read is the mark that
+  followed what it was sent (`sse/mark!`), and otherwise the whole cached
+  frame. After the window, every island is unmounted and everything they held
+  is released.
 
   Each session is run by one pump: a virtual thread that owns all of the
   session's mutable state, its island runtime included, and consumes the
@@ -36,6 +38,17 @@
                       a view of its own (see `island/error-view`).
   - `:first-frame-ms` optional: how long, in ms, the session's first frame may
                       wait for reads still pending (below). Defaults to 0.
+  - `:stream-max-ms`  optional: how long, in ms, the tab's stream stays open
+                      before the session ends it, and Datastar reconnects it
+                      at once, to this session, which sends what changed
+                      meanwhile, since the page has the rest. Off by default.
+                      For a balancer whose stickiness lapses, such as a
+                      cookie that lasts ten minutes: set under that, each
+                      reconnect passes the balancer while the tab is open,
+                      and renews it if the balancer renews on each response.
+                      A stream ends at a random point in the last tenth of
+                      it, so streams opened together don't reconnect
+                      together.
 
   The first frame a session delivers, to the page or over the stream that
   rebuilt the session, is the first a client sees from it. Its reads are often
@@ -67,7 +80,8 @@
     [dev.onionpancakes.chassis.core :as h])
   (:import
     [co.multiply.tropical.signal Inbox]
-    [java.util ArrayList]))
+    [java.util ArrayList]
+    [java.util.concurrent ThreadLocalRandom]))
 
 
 (def grace-ms
@@ -103,6 +117,14 @@
   (System/currentTimeMillis))
 
 
+(defn- recycle-at
+  "When a stream attached now is ended, for `app`'s `:stream-max-ms`: at a
+  random point in the last tenth of it. Nil without one."
+  [app]
+  (when-some [ms (:stream-max-ms app)]
+    (- (+ (now) (long ms)) (long (rand (quot (long ms) 10))))))
+
+
 (defn- post!
   [session event]
   (Inbox/.post (:inbox session) event))
@@ -134,7 +156,10 @@
 ;;   :latest      the last rendered Frame
 ;;   :conn        the attached SSE generator, or nil
 ;;   :load        the page load the session belongs to: the first to attach
+;;   :recycle-at  when the attached stream is ended for its age (`:stream-max-ms`), or nil
 ;;   :sent        the Frame the client is showing; nil means unknown, so resync
+;;   :sent-id     the id of the mark (`sse/mark!`) that went out after `sent`, or nil for the page's own
+;;   :marks       how many marks were sent, which numbers the next; :mark-prefix this session's, in their ids
 ;;   :ssr         a promise awaiting the first frame, for server-side rendering
 ;;   :scripts     how many of the runtime's scripts (`runtime/scripts`) the client was sent
 ;;   :ssr-scripts how many of them went with the first frame, for the page's head
@@ -146,9 +171,11 @@
 
 
 (defn- detach
+  "Detaches the stream. What the client was sent stays known: the stream that
+  attaches next says, by the last id it read, whether it has it (`:attach`)."
   [st]
   (set-attached! (:session st) false)
-  (assoc st :conn nil :sent nil :detached-at (now)))
+  (assoc st :conn nil :detached-at (now)))
 
 
 (defn- close
@@ -228,7 +255,7 @@
       :ssr (assoc st :ssr (second event))
       ;; The page has the first frame's scripts in its head: don't send them.
       :scripts-in-page (update st :scripts #(max (long (or % 0)) (long (:ssr-scripts st 0))))
-      :attach (let [[_ conn load] event
+      :attach (let [[_ conn load last-id] event
                     prev (:conn st)]
                 (if (and (contains? st :load) (not= load (:load st)))
                   ;; Another page with this tab id: a copy, such as a duplicated
@@ -238,9 +265,11 @@
                   (do (when (and prev (not (identical? prev conn)))
                         (sse/close! prev))
                     (set-attached! (:session st) true)
-                    ;; Replacing a live connection: we don't know what the client got.
-                    (cond-> (assoc st :conn conn :load load :detached-at nil)
-                      prev (assoc :sent nil)))))
+                    ;; The client has what it was sent if the last id it read is
+                    ;; the mark after it: then it gets only what changed since.
+                    ;; Otherwise it may have any part of it, and resyncs.
+                    (cond-> (assoc st :conn conn :load load :detached-at nil :recycle-at (recycle-at (:app st)))
+                      (not= last-id (:sent-id st)) (assoc :sent nil)))))
       :detach (if (identical? (second event) (:conn st))
                 (detach st)
                 st)
@@ -325,6 +354,8 @@
 
 
 (defn- send-frame
+  "Sends the frame's patches, and the app's signals with them. Nil if the
+  stream closed."
   [{:keys [conn sent latest] :as st}]
   (let [{:keys [morph insert] :as patches} (island/patches sent latest)
         htmls    (mapv island/html morph)
@@ -336,17 +367,14 @@
       (= patches island/no-patches)
       (assoc st :sent latest)
 
-      ;; The frame's events go out in one flush.
-      (sse/together conn
-        #(and (send-patches! conn patches htmls inserted)
-           (if-some [signals (patch-signals st patched n)]
-             (sse/signals! conn signals)
-             true)))
-      (do (Thread/sleep (long frame-ms))
-        (assoc st :sent latest :last-send (now)))
+      (and (send-patches! conn patches htmls inserted)
+        (if-some [signals (patch-signals st patched n)]
+          (sse/signals! conn signals)
+          true))
+      (assoc st :sent latest)
 
       :else
-      (detach st))))
+      nil)))
 
 
 (defn- unsent-scripts
@@ -375,32 +403,46 @@
 
 (defn- send-signals
   "Sends the signal patches the islands made that the client wasn't, in
-  order, after the frame that came with them. If the stream closed, detaches,
-  and keeps those not sent for the next connection."
+  order, after the frame that came with them. Nil if the stream closed."
   [{:keys [conn signals] :as st}]
-  (if (or (nil? conn) (empty? signals))
-    st
-    (loop [[s & more :as left] signals]
-      (cond
-        (nil? s) (-> st (dissoc :signals) (assoc :last-send (now)))
-        (sse/signals! conn s) (recur more)
-        :else (detach (assoc st :signals (vec left)))))))
+  (when (every? #(sse/signals! conn %) signals)
+    (dissoc st :signals)))
+
+
+(defn- send-mark
+  "Sends the mark `id` after what went out (`sse/mark!`), which the client
+  sends back when it reconnects. Nil if the stream closed."
+  [st id]
+  (when (sse/mark! (:conn st) id)
+    (assoc st :sent-id id)))
 
 
 (defn- sync-client
   "Sends what the attached client lacks (`island/patches`): the scripts its
   islands declared, then the topmost changed islands, and the children a list
-  gained or lost; the whole root after a (re)connect; then the signals the
-  islands patched; or a heartbeat so a dead connection is noticed."
+  gained or lost, or the whole root when what it has is unknown; then the
+  signals the islands patched; then a mark, all in one flush. Or a heartbeat,
+  so a dead connection is noticed."
   [{:keys [conn sent latest last-send hold-until signals] :as st}]
   (cond
     (or (nil? conn) hold-until)
     st
 
     (or (not (identical? sent latest)) (unsent-scripts st) (seq signals))
-    (if-some [st (send-scripts st)]
-      (send-signals (cond-> st (not (identical? sent latest)) send-frame))
-      (detach st))
+    ;; One flush, ending in a mark: a client that read the mark has all of it.
+    ;; A mark's id is never used again, even when its flush fails: the client
+    ;; may have read it.
+    (let [frame? (not (identical? sent latest))
+          n      (inc (long (or (:marks st) 0)))
+          sent   (sse/together conn
+                   #(some-> st send-scripts (cond-> frame? send-frame) send-signals
+                      (send-mark (str (:mark-prefix st) "." n))))]
+      (if sent
+        (do (when frame? (Thread/sleep (long frame-ms)))
+          (assoc sent :last-send (now) :marks n))
+        ;; The client may have any part of it: its next stream resyncs, and gets
+        ;; the signal patches again.
+        (assoc (detach st) :sent nil :marks n)))
 
     (< (+ (or last-send 0) (long heartbeat-ms)) (now))
     (if (sse/heartbeat! conn)
@@ -408,6 +450,18 @@
       (detach st))
 
     :else
+    st))
+
+
+(defn- recycle
+  "Ends a stream that has been open for the app's `:stream-max-ms`. Datastar
+  reconnects it at once, through whatever stands in front of the server, as
+  the same page load, and with the last id it read gets only what changed
+  since (`:attach`): often nothing, so the page isn't patched."
+  [{:keys [conn recycle-at] :as st}]
+  (if (and conn recycle-at (<= (long recycle-at) (now)))
+    (do (sse/close! conn)
+      (detach st))
     st))
 
 
@@ -419,11 +473,12 @@
 
 
 (defn- wait-ms
-  [{:keys [conn detached-at hold-until]}]
+  [{:keys [conn detached-at hold-until recycle-at]}]
   (cond-> (if conn
             heartbeat-ms
             (max 1 (- (+ detached-at (long grace-ms)) (now))))
-    hold-until (min (max 1 (- (long hold-until) (now))))))
+    hold-until (min (max 1 (- (long hold-until) (now))))
+    (and conn recycle-at) (min (max 1 (- (long recycle-at) (now))))))
 
 
 (defn- handle-events
@@ -470,6 +525,7 @@
      :latest      (runtime/frame! rt root [])
      :changed     (ArrayList.)
      :detached-at start
+     :mark-prefix (Long/toString (ThreadLocalRandom/.nextLong (ThreadLocalRandom/current) Long/MAX_VALUE) 36)
      :hold-until  (when (pos? (long (:first-frame-ms app 0)))
                     (+ start (long (:first-frame-ms app))))}))
 
@@ -480,7 +536,7 @@
   [st inbox]
   (let [st (handle-events st inbox (wait-ms st))]
     (try
-      (-> st render hold deliver-ssr sync-client expire)
+      (-> st render hold deliver-ssr sync-client recycle expire)
       (catch Throwable t
         (fail st t)))))
 
@@ -535,6 +591,12 @@
     (start! session app)))
 
 
+(defn ^:no-doc held?
+  "Whether this process holds a session for `tab`."
+  [tab]
+  (contains? @!sessions tab))
+
+
 (defn ^:no-doc obtain!
   "The session for `tab` if `uid` owns it. A fresh one if `tab` is unknown: it
   expired, or the server restarted, and the client resyncs from its first frame.
@@ -571,13 +633,16 @@
 
 
 (defn ^:no-doc attach!
-  "Attaches the connection `sse` from the page load `load`. The first load to
-  attach owns the session. Another is a copy of the page, with the same tab id,
-  and is told to reload."
-  [session sse load]
-  (post! session [:attach sse load])
-  (when (realized? (:closed session))
-    (sse/close! sse)))
+  "Attaches the connection `sse` from the page load `load`, whose client last
+  read the event id `last-id`, or none. The first load to attach owns the
+  session. Another is a copy of the page, with the same tab id, and is told to
+  reload."
+  ([session sse load]
+   (attach! session sse load nil))
+  ([session sse load last-id]
+   (post! session [:attach sse load last-id])
+   (when (realized? (:closed session))
+     (sse/close! sse))))
 
 
 (defn ^:no-doc detach!

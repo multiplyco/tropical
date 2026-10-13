@@ -69,6 +69,6 @@ the island renders the files and their progress.
 - **What the store must allow.** The browser's request goes to the target's origin: a store elsewhere needs CORS
   allowing the page's origin, the method and the headers, and a CSP restricting `connect-src` must allow it. The
   browser's half is a script, served by `wrap-scripts`.
-- **What stays behind.** An object whose arrival is never reported, because the tab closed or the island unmounted,
-  or that was removed or refused once it arrived, stays in the store. Upload under a prefix the store expires, and
-  keep what the app takes.
+- **What stays behind.** An object whose arrival is never reported, because the tab closed, the island unmounted or the
+  tab's session moved to another server ([Serving pages](serving.md#running-it)), or that was removed or refused once
+  it arrived, stays in the store. Upload under a prefix the store expires, and keep what the app takes.

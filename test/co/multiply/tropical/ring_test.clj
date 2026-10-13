@@ -64,9 +64,9 @@
 
 
 (defn- tokens
-  "The action tokens in `html`, in document order."
+  "The action tokens in `html`, in document order: each its tab, then a uuid."
   [html]
-  (map second (re-seq (re-pattern (str "Tropical-Action.*?(" uuid ")")) html)))
+  (map second (re-seq (re-pattern (str "Tropical-Action.*?([A-Za-z0-9-]+_" uuid ")")) html)))
 
 
 (defisland buttons
@@ -79,6 +79,7 @@
 (deftest an-action-is-invoked-for-its-user
   (let [{:keys [step rt]} (harness buttons {:tab "tab" :uid "alice"})
         [nothing signals] (tokens (island/html (step)))]
+    (is (every? #(= "tab" (action/token-tab %)) [nothing signals]) "a token names its tab")
     (is (= {:status 204} (act nothing "alice")))
     (is (= {:note ""} (json/parse (:body (act signals "alice")) {:key-fn keyword})))
     (is (= 403 (:status (act nothing "mallory"))) "another user's action")
@@ -90,6 +91,32 @@
     (runtime/dispose! rt)
     (is (= 404 (:status (act nothing "alice"))) "revoked with its island")
     (is (= 404 (:status (act (str (random-uuid)) "alice"))) "never minted")))
+
+
+(deftest an-action-whose-tab-is-held-elsewhere-reopens-the-stream
+  (let [tab      (str (random-uuid))
+        token    (str tab "_" (random-uuid))
+        s        (session/create! tab "alice" {:root (fn [_] (hello))})
+        datastar #(handler (update (action-request token "alice") :headers assoc "datastar-request" "true"))]
+    (is (= 404 (:status (datastar))) "its tab held here, a token it doesn't know is revoked: the stream updates the page")
+    (session/close! s)
+    (is (deref (:closed s) 1000 false))
+    (testing "its tab held nowhere here"
+      (let [resp (datastar)]
+        (is (= 200 (:status resp)))
+        (is (str/includes? (get-in resp [:headers "Content-Type"]) "text/event-stream"))
+        (is (str/includes? (:body resp) "tropical:reopen") "Datastar's request: events that reopen the page's stream"))
+      (let [resp (act token "alice")]
+        (is (= 409 (:status resp)))
+        (is (some? (get-in resp [:headers "Tropical-Reopen"])) "a script's: a header it reopens the stream on")))
+    (is (= 404 (:status (act (str "not-a-tab_" (random-uuid)) "alice"))) "a token naming no tab")
+    (is (= 404 (:status (act (str (random-uuid)) "alice"))) "a token naming none, as before tokens named their tab")))
+
+
+(deftest the-handler-checks-stream-max-ms
+  (is (some? (ring/handler (assoc app :stream-max-ms 300000))))
+  (doseq [v [0 -1 "5m" 1.5]]
+    (is (thrown? IllegalArgumentException (ring/handler (assoc app :stream-max-ms v))) (pr-str v))))
 
 
 (def ^:dynamic *route* nil)
@@ -279,17 +306,27 @@
 
 
 (deftest a-stream-can-stay-open-while-its-page-is-hidden
-  (let [tab (str (random-uuid))]
-    (is (not (str/includes? (ring/stream-init tab) "openWhenHidden"))
+  (let [tab    (str (random-uuid))
+        plain  (ring/stream-init tab)
+        hidden (ring/stream-init tab {:open-when-hidden true})]
+    (is (not (str/includes? plain "openWhenHidden"))
       "by default Datastar closes it while hidden, and reopens it when shown")
-    (is (str/includes? (ring/stream-init tab {:open-when-hidden true}) "openWhenHidden: true"))
-    (is (= (ring/stream-init tab) (ring/stream-init tab {:open-when-hidden false})))
-    (is (= 1 (count (re-seq datastar-statement (ring/stream-init tab {:open-when-hidden true})))))
-    (is (re-find #"addEventListener\('pagehide'.*requestCancellation" (ring/stream-init tab {:open-when-hidden true}))
+    (is (str/includes? hidden "openWhenHidden: true"))
+    (is (= plain (ring/stream-init tab {:open-when-hidden false})))
+    (is (every? #(= 1 (count (re-seq datastar-statement %))) [plain hidden]))
+    (is (str/includes? hidden "addEventListener('pagehide', () => stream.abort())")
       "kept open, it is cancelled as the page is left")
-    (is (str/includes? (ring/stream-init tab {:open-when-hidden true}) "addEventListener('pageshow'")
+    (is (str/includes? hidden "addEventListener('pageshow'")
       "and opened again as the page is restored")
     (is (thrown? Exception (ring/stream-init tab {:open-hidden true})) "an option it doesn't know")))
+
+
+(deftest a-stream-reopens-as-the-same-page-load
+  (doseq [init [(ring/stream-init (str (random-uuid))) (ring/stream-init (str (random-uuid)) {:open-when-hidden true})]]
+    (is (str/includes? init "addEventListener('tropical:reopen', open)"))
+    (is (str/includes? init "'Tropical-Load': load") "with the load's id, made once")
+    (is (= 1 (count (re-seq #"Math\.random" init))))
+    (is (str/includes? init "stream && stream.abort()") "the stream before it ends")))
 
 
 (deftest request-kind-tells-the-handlers-requests-apart

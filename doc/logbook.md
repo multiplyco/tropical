@@ -1079,3 +1079,64 @@ REPL):
 
 Not exercised: a Rocket module first loaded over the stream, when an island using it is patched in, and a component
 inside another's children.
+
+## 2026-10-13 — An action that reaches another server, and streams ended at an age
+
+Checked in Chrome against the demo, on one server, with the other server made from the REPL: for the test tab only,
+`action/invoke!` answered `[:gone]` and `session/held?` false, as a server without the tab's session would. A field
+bound to a signal held text typed before each click.
+
+- A click on the rating card was answered with the reopen event. The click didn't run: no rating. The page didn't
+  reload, the typed text stayed, and the page opened one new stream, with the page load's id it had. Landing on the
+  server that held the tab, the stream attached to the same session, and the next click rated.
+- The same, with the session closed as the action was answered, so the reopened stream found no session, as on
+  another server: it rebuilt the tab, a new session under the same tab id, with the page as it was, the typed text
+  included. The next click rated, through the new session's tokens.
+- `:stream-max-ms` 5000, set on the demo from the REPL: the stream ended about 5 s after it opened, and the next opened
+  about a second later, Datastar's retry interval, as the same page load, attached to the same session. Over 18 s the
+  session stayed the one the page was served with, and a click then rated without a reload. Datastar resets its retry
+  count on each answer of 200, so ending streams doesn't use up its retries.
+
+Not exercised: two servers behind a balancer, which takes a deployment; and the upload module and the browser-storage
+script reopening the stream on a `Tropical-Reopen` answer.
+
+## 2026-10-13 — A dropped action's notice, and a reconnect that sends only what changed
+
+The demo's footer now shows a notice on `tropical:reopen`, by a signal. Checked in Chrome with the same stand-in for
+another server as in the entry before: the click on the rating card was dropped, the notice showed, the page didn't
+reload, Dismiss hid it, and the next click rated.
+
+A stream ended for its age now keeps what the page was sent, unless a patch went out within a second of the end
+(`session/recycle-quiet-ms`). With `:stream-max-ms` 5000 on `/topic/gamma`, whose feed ticks every 2.5 s, the
+footer's wire counts over 23 s and four reconnects:
+
+- Two reconnects came more than a second after a patch, and sent only what changed while the stream was down,
+  4205 to 4784 chars: the resources card, which counts sessions attached and detached, and once a tick that fell in
+  the gap.
+- Two came within about a second of a tick, and resent the root, the whole page, 8161 chars.
+
+On the home page, whose feed ticks every second, a stream is never a second quiet, so every reconnect resyncs, as
+before. Behind a balancer the quiet case is the one `:stream-max-ms` is for: an idle tab.
+
+## 2026-10-13 — Event ids say what a reconnecting page has
+
+The one-second quiet window of the entry before is gone. Each send now ends, in its flush, with a mark: an empty
+signal patch carrying an SSE id. From the bundle the demo loads, Datastar 1.0.4 records an id as it reads the `id:`
+line, before the event is applied, and sends the last one back as `last-event-id` on every reconnect of the request
+that read it: a retry, a stream the server ended, and a hidden page shown again, whose `visibilitychange` handler
+reopens the request with the same headers. A request opened anew, as the reopen after a dropped action, sends none.
+
+Checked in Chrome on the home page, whose feed ticks every second:
+
+- `:stream-max-ms` 5000: over 16 s and two reconnects, neither resent the page (38066 chars). The largest frame after
+  one, 4700 chars, held the islands that had changed while the stream was down: the resources card, the vault feed
+  and the ticker. With the quiet window, every reconnect of this page resent it.
+- A hidden page, made by `document.hidden` reading true and a `visibilitychange`, shown again 3.5 s later: it got the
+  whole page. Datastar sent the last id it read, mark 165, which went out about 100 ms before the page hid. The server
+  then wrote marks 166 and 167, about 0.5 and 0.9 s after, into the connection the client had closed, before a write
+  failed. So the ids didn't match, as they shouldn't: a page whose islands change every second resyncs when it is
+  shown again, as before, and a quiet one gets what changed.
+- The same trace showed the next send using a failed flush's mark id again. Fixed: an id is never used twice.
+
+Not done: a page that read an older mark could get what changed since that mark, if the session kept the frames it
+sent for a while, with the parts of a step it may have read partly sent again as morphs rather than inserts.

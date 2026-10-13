@@ -11,7 +11,8 @@ from here.
 - **Actions are capabilities.** An action is an unguessable token, bound to the session's user, that exists while its
   island renders it. A POST with another user's token gets a 403, and one with a token never minted, or revoked since,
   a 404. The token travels in a header, which a cross-site form can't set, so a page elsewhere can't post an action
-  on the user's behalf ([Actions](actions.md), [design](design.md#actions)).
+  on the user's behalf ([Actions](actions.md), [design](design.md#actions)). It begins with its tab's id, which the
+  page already has, so a server that doesn't hold the tab can tell; its random part is what can't be guessed.
 - **A token outlives its island's last render by a moment.** It is revoked at the session's next render, so a request
   can arrive just after the island stopped rendering the action. Writes that matter check again in the write path.
 - **An action per thing acted on needs no check that the thing is allowed.** An action keyed `[:remove id]`, rendered

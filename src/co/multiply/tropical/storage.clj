@@ -300,11 +300,11 @@
   server can render from it, such as a row per item, or a count."
   [handle]
   (let [{:keys [state slot default]} handle
-        {:keys [uid]} (island/use-session)
+        {:keys [uid tab]} (island/use-session)
         {:keys [token !value !handler]}
         (island/use-hold [::observe (:signal state) slot]
           (fn []
-            (let [{:keys [value release]} (action/mint uid)]
+            (let [{:keys [value release]} (action/mint uid tab)]
               {:value   (assoc value :!value (atom ::unsent))
                :release release}))
           {:idempotent true})]
@@ -433,7 +433,9 @@
     "const x = get('_storage', w[0], w[1]);"
     "fetch(location.href, {method: 'POST', headers: {'Tropical-Action': t, 'Content-Type': 'application/json'},"
     " body: JSON.stringify({value: x === undefined ? null : x})})"
-    ".then(r => { if (r.status === 403 || r.status === 404) $._storageWatch[t] = null })"
+    ".then(r => {"
+    " if (r.headers.has('Tropical-Reopen')) dispatchEvent(new CustomEvent('tropical:reopen'));"
+    " else if (r.status === 403 || r.status === 404) $._storageWatch[t] = null })"
     ".catch(() => {});"
     "};"
     "const later = (t, ms) => { clearTimeout(g.timers[t]); g.timers[t] = setTimeout(() => send(t), ms) };"

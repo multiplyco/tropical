@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.4.0 - 2026-10-13
+
+- An action that reaches a server that doesn't hold its tab's session, as when a balancer's stickiness lapsed while
+  the tab sat open, or after a restart, makes its page reopen its stream. The balancer sends the stream where it sent
+  the action, and that server rebuilds the tab from its route: the page updates in place, keeping what the browser
+  holds, such as typed text bound to a signal, and the action is dropped. It got a 404 before, which left the page
+  without working actions until it was reloaded. A token now names its tab, so a token revoked on a server that holds
+  the tab still gets the 404. A script's request with a `use-token` token gets a 409 with a `Tropical-Reopen` header,
+  on which it dispatches `tropical:reopen`; the upload module and the browser-storage script do.
+- The page's `tropical:reopen` event, on `window`, fires for a dropped action and nothing else, so an app can say that
+  it didn't go through. The demo shows a notice. The Serving guide says what a rebuild keeps: the browser's state, not
+  the first server's memory.
+- A stream that reconnects to its session gets only what changed while it was away, where it got the whole page. Each
+  send ends with an event carrying an SSE id, which Datastar sends back as `Last-Event-ID` when it reconnects, so the
+  session knows whether the page has everything it was sent. A page that may lack some of it, as when the server
+  wrote into a connection already gone, gets the whole page, as before.
+- Add the app's `:stream-max-ms`, off by default, which ends each stream after that long. Datastar reconnects it at
+  once to the same session, through the balancer, so stickiness that lasts a fixed time, renewed on each response,
+  doesn't lapse under an open tab. The reconnect gets only what changed meanwhile.
+
 ## 0.3.0 - 2026-10-13
 
 - Breaking: an error view is `(fn [failure] hiccup)`, where it was `(fn [id e] hiccup)`. `failure` is a map: the

@@ -7,12 +7,16 @@ const parallel = 3
 const queue = []
 let running = 0
 
-function post(token, body) {
-  return fetch(location.href, {
+// A request that reached a server without the tab's session is answered
+// with `Tropical-Reopen`: the page's stream follows it there.
+async function post(token, body) {
+  const res = await fetch(location.href, {
     method: 'POST',
     headers: {'Content-Type': 'application/json', 'Tropical-Action': token},
     body: JSON.stringify(body),
   })
+  if (res.headers.has('Tropical-Reopen')) dispatchEvent(new CustomEvent('tropical:reopen'))
+  return res
 }
 
 // `$` is Datastar's signals. Reading one that doesn't exist makes it "", and
@@ -53,6 +57,8 @@ function next() {
 export async function start($, token, files) {
   if (!files.length) return
   const res = await post(token, {files: files.map((f) => ({name: f.name, type: f.type, size: f.size}))})
+  // Dropped, with the page told (`tropical:reopen`): the user picks again.
+  if (res.headers.has('Tropical-Reopen')) return
   if (!res.ok) throw new Error(`Tropical: the island took no files (${res.status}).`)
   const {targets} = await res.json()
   targets.forEach((target, i) => {

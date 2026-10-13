@@ -47,6 +47,19 @@
     (EventStream/data (EventStream/event "datastar-patch-signals") "signals" (json/write-str m))))
 
 
+(defn mark!
+  "An event that changes nothing and carries `id`, an SSE event id. The client
+  keeps the last id it read, and sends it back as `Last-Event-ID` when it
+  reconnects, so an id read last says the client has every event before it. An
+  empty signal patch, which Datastar applies as nothing. Returns false if the
+  stream is closed."
+  [stream id]
+  (EventStream/.send stream
+    (-> (EventStream/event "datastar-patch-signals")
+      (StringBuilder/.append (str "id: " id "\n"))
+      (EventStream/data "signals" "{}"))))
+
+
 (defn heartbeat!
   "A comment, which the client ignores: a dead connection is noticed, and an
   idle one kept open. Returns false if the stream is closed."

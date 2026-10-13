@@ -54,6 +54,7 @@
                   sse/patch! (fn [conn htmls] (swap! !sent conj [conn (patched-ids htmls)]) true)
                   sse/signals! (fn [_ _] true)
                   sse/heartbeat! (fn [_] true)
+                  sse/mark! (fn [_ _] true)
                   sse/close! (fn [_] true)
                   session/grace-ms 300
                   session/frame-ms 0
@@ -112,6 +113,7 @@
                   sse/patch! (fn [conn htmls] (swap! !sent conj [conn (patched-ids htmls)]) true)
                   sse/signals! (fn [_ _] true)
                   sse/heartbeat! (fn [_] true)
+                  sse/mark! (fn [_ _] true)
                   sse/close! (fn [_] true)
                   sse/reload! (fn [conn] (swap! !reloaded conj conn) true)
                   session/frame-ms 0]
@@ -140,6 +142,7 @@
                   sse/patch! (fn [_ _] true)
                   sse/signals! (fn [_ m] (swap! !signals conj m) true)
                   sse/heartbeat! (fn [_] true)
+                  sse/mark! (fn [_ _] true)
                   sse/close! (fn [_] true)
                   session/frame-ms 0]
       (let [s (session/create! (str (random-uuid)) "u"
@@ -170,6 +173,7 @@
     (with-redefs [sse/together (fn [_ f] (f))
                   sse/patch! (fn [_ _] true)
                   sse/heartbeat! (fn [_] true)
+                  sse/mark! (fn [_ _] true)
                   sse/close! (fn [conn] (swap! !closed conj conn) true)
                   session/frame-ms 0]
       (let [tab (str (random-uuid))
@@ -225,6 +229,96 @@
 (defisland go-button
   []
   [:button {:data-on:click (use-action :go (fn [_] nil))} "Go"])
+
+
+(defn- reconnected
+  "Runs a session of `shell`: attached, a value emitted, then the stream ended
+  by `end!`, given the session, then attached again as the same page load,
+  with the last mark id the first stream was sent if `last-id?`, then another
+  value emitted. Returns what each connection was sent, `[conn ids]`, in order,
+  and the connections closed. `opts` go in the app."
+  [end! last-id? opts]
+  (let [!sent   (atom [])
+        !closed (atom [])
+        !marks  (atom [])
+        [key subject emit!] (manual-source)]
+    (with-redefs [sse/together (fn [_ f] (f))
+                  sse/patch! (fn [conn htmls] (swap! !sent conj [conn (patched-ids htmls)]) true)
+                  sse/signals! (fn [_ _] true)
+                  sse/heartbeat! (fn [_] true)
+                  sse/mark! (fn [conn id] (swap! !marks conj [conn id]) true)
+                  sse/close! (fn [conn] (swap! !closed conj conn) true)
+                  session/frame-ms 0]
+      (let [s (session/create! (str (random-uuid)) "u" (merge {:root (fn [_] (shell key subject))} opts))]
+        (session/render-page! s)
+        (session/attach! s :conn-1 "load-1")
+        (emit! 1)
+        (Thread/sleep 100)
+        (let [early @!closed]
+          (end! s)
+          (session/attach! s :conn-2 "load-1" (when last-id? (second (last @!marks))))
+          (Thread/sleep 100)
+          (let [reattached @!sent]
+            (emit! 2)
+            (Thread/sleep 100)
+            (session/close! s)
+            (deref (:closed s) 1000 false)
+            {:early early :closed @!closed :reattached reattached :sent @!sent}))))))
+
+
+(defn- resent?
+  "Whether `conn` was sent the whole root of `shell`."
+  [sent conn]
+  (some #(= [conn [(e "shell")]] %) sent))
+
+
+(deftest a-stream-is-ended-at-its-age-and-reconnects-to-its-session
+  (let [{:keys [early closed reattached sent]} (reconnected (fn [_] (Thread/sleep 350)) true {:stream-max-ms 300})]
+    (is (empty? early) "not before its age")
+    (is (= :conn-1 (first closed)) "ended at its age")
+    (is (not-any? #(= :conn-2 (first %)) reattached) "the reconnect, with the last id it read, gets nothing it has")
+    (is (= [:conn-2 [(e "shell/value-view")]] (last sent)) "then a change, as a patch of its island")))
+
+
+(deftest a-reconnect-gets-what-its-page-lacks
+  (let [drop! #(session/detach! % :conn-1)]
+    (testing "the page read the last mark: what changed since"
+      (let [{:keys [reattached sent]} (reconnected drop! true nil)]
+        (is (not (resent? reattached :conn-2)))
+        (is (= [:conn-2 [(e "shell/value-view")]] (last sent)))))
+    (testing "without it, it may lack any of it: the whole root"
+      (is (resent? (:reattached (reconnected drop! false nil)) :conn-2)))))
+
+
+(deftest a-flush-that-fails-resyncs-the-next-stream
+  (let [!sent   (atom [])
+        !fail   (atom false)
+        !marks  (atom [])
+        [key subject emit!] (manual-source)]
+    (with-redefs [sse/together (fn [_ f] (let [r (f)] (and (not @!fail) r)))
+                  sse/patch! (fn [conn htmls] (swap! !sent conj [conn (patched-ids htmls)]) true)
+                  sse/signals! (fn [_ _] true)
+                  sse/heartbeat! (fn [_] true)
+                  sse/mark! (fn [conn id] (swap! !marks conj [conn id]) true)
+                  sse/close! (fn [_] true)
+                  session/frame-ms 0]
+      (let [s (session/create! (str (random-uuid)) "u" {:root (fn [_] (shell key subject))})]
+        (session/render-page! s)
+        (session/attach! s :conn-1 "load-1")
+        (emit! 1)
+        (Thread/sleep 100)
+        (let [read-id (second (last @!marks))]
+          (reset! !fail true)
+          (emit! 2)
+          (Thread/sleep 100)
+          (reset! !fail false)
+          (session/attach! s :conn-2 "load-1" read-id)
+          (Thread/sleep 100)
+          (is (resent? @!sent :conn-2)
+            "the client may have part of what failed, though it read the mark before: the whole root")
+          (is (apply distinct? (map second @!marks)) "a failed flush's mark id isn't used again"))
+        (session/close! s)
+        (is (deref (:closed s) 1000 false))))))
 
 
 (deftest closing-a-user-closes-their-sessions-only
@@ -307,6 +401,7 @@
                   sse/patch! (fn [_ htmls] (swap! !sent conj htmls) true)
                   sse/signals! (fn [_ _] true)
                   sse/heartbeat! (fn [_] true)
+                  sse/mark! (fn [_ _] true)
                   sse/close! (fn [_] true)]
       (let [s (session/obtain! (str (random-uuid)) "alice"
                 {:root (fn [_] (reading (fresh-key) (after 50 1))) :first-frame-ms 2000})]
@@ -343,6 +438,7 @@
                   sse/remove! (fn [_ selector] (swap! !events conj [:remove selector]) true)
                   sse/signals! (fn [_ _] true)
                   sse/heartbeat! (fn [_] true)
+                  sse/mark! (fn [_ _] true)
                   sse/close! (fn [_] true)
                   session/frame-ms 0]
       (let [s (session/create! (str (random-uuid)) "alice" {:root (fn [_] (rows))})]
@@ -394,6 +490,7 @@
                                ([_ htmls {:keys [mode selector]}] (swap! !events conj [mode selector htmls]) true))
                   sse/signals! (fn [_ _] true)
                   sse/heartbeat! (fn [_] true)
+                  sse/mark! (fn [_ _] true)
                   sse/close! (fn [_] true)
                   session/frame-ms 0]
       (testing "a script of the first frame"
@@ -462,6 +559,7 @@
                   sse/remove! (fn [_ selector] (swap! !events conj [:remove selector]) true)
                   sse/signals! (fn [_ m] (swap! !events conj [:signals m]) true)
                   sse/heartbeat! (fn [_] true)
+                  sse/mark! (fn [_ _] true)
                   sse/close! (fn [_] true)
                   session/frame-ms 0]
       (let [s (session/create! (str (random-uuid)) "alice" {:root (fn [_] (import-page))})]

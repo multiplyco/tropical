@@ -62,12 +62,13 @@ How a change reaches the sessions that read it: a few Java classes, on the path 
 - **One page per session.** The stream carries an id made per page load, and the session belongs to the first load to
   attach. A copy of the page that shares the tab id is told to reload.
 - **Reconnects are routine.** Datastar closes a hidden tab's stream and reopens it when the tab is shown. A detached
-  session keeps its islands, and so their resources, for `grace-ms` (15 s); reattaching resyncs from cache without
-  reopening anything. After that, every island unmounts and everything they held is released. A tab the server doesn't
-  know, because its session expired or the server restarted, gets a fresh session. An action taken in a hidden tab
-  runs, and its result shows once the tab is shown again, within the grace. For development, where browser
-  automation may drive a page its browser keeps hidden, `:open-when-hidden true` in the app keeps the stream open
-  while hidden, so each change shows as it happens.
+  session keeps its islands, and so their resources, for `grace-ms` (15 s); reattaching sends what the page lacks
+  without reopening anything: what changed while it was away, if the last event id the page read says it has the rest,
+  and otherwise the whole cached frame. After that, every island unmounts and everything they held is released. A tab
+  the server doesn't know, because its session expired or the server restarted, gets a fresh session. An action taken
+  in a hidden tab runs, and its result shows once the tab is shown again, within the grace. For development, where
+  browser automation may drive a page its browser keeps hidden, `:open-when-hidden true` in the app keeps the stream
+  open while hidden, so each change shows as it happens.
 - **One pump per session.** A Quiescent task on a virtual thread owns the session's state and renders on its behalf,
   never on the thread that made a change, so a shared subscription's loop never renders for anyone.
 - **Backpressure.** Changes that arrive while a frame is being sent coalesce into the next one, `frame-ms` apart, and

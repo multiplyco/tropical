@@ -20,6 +20,13 @@
   `request-kind` tells them apart, for middleware that runs before routing and
   must let them through, such as one that refuses or parses request bodies.
 
+  An action can reach a server that doesn't hold its tab's session: a
+  balancer's stickiness lapsed while the tab sat open, or the server
+  restarted. An action's token names its tab, so the handler tells that apart
+  from a token since revoked, which gets a 404: the page reopens its stream,
+  which rebuilds the tab where the action went, and the action is dropped.
+  The session's `:stream-max-ms` keeps such stickiness from lapsing.
+
   A stream passes the route's middleware each time it connects, and a refusal,
   because the login expired or what the page shows is gone, would leave the
   tab stale: Datastar retries it, then gives up. `wrap-refused-streams` answers
@@ -133,9 +140,15 @@
   new one.
 
   Datastar closes the stream while the page is hidden, and reopens it when the
-  page is shown, which resyncs it. An action taken meanwhile runs, and its
+  page is shown, which brings it up to date. An action taken meanwhile runs, and its
   result shows once the page is shown again, within the session's grace
   (`session/grace-ms`).
+
+  A `tropical:reopen` event on `window` reopens the stream, as the same page
+  load: the answer to an action that reached a server without the tab's
+  session dispatches it, so the stream follows the action there. Nothing else
+  does, so an app listens for it to say that an action was dropped, as
+  `data-on:tropical:reopen__window`.
 
   `mount` renders it into the element the app mounts in, with the app's own
   `:open-when-hidden`. For a page of its own making, `opts`:
@@ -155,20 +168,21 @@
      (throw (ex-info (str "Unknown stream-init options: " (vec unknown)) {:options opts})))
    (when (= tab (:tab (page/current)))
      (page/mark! :stream))
-   (let [request (fn [load more]
-                   (str "@get(location.href, {headers: {'Tropical-Tab': '" tab "', 'Tropical-Load': " load "}, "
-                     "retry: 'always'" more "})"))]
-     (if open-when-hidden
-       ;; Leaving a page hides it, where Datastar closes the stream, unless
-       ;; it is kept open; showing it again, as the back/forward cache
-       ;; restores it, reopens it. Kept open, the stream is cancelled as the
-       ;; page is left instead, and opened again, as the same page load, as
-       ;; it is restored. One statement, as Datastar splits them.
-       (str "(() => {let load = Math.random().toString(36).slice(2), open = () => {"
-         "let left = new AbortController(); addEventListener('pagehide', () => left.abort(), {once: true}); "
-         (request "load" ", openWhenHidden: true, requestCancellation: left") "}; "
-         "addEventListener('pageshow', (evt) => evt.persisted && open()); open()})()")
-       (request "Math.random().toString(36).slice(2)" nil)))))
+   ;; One statement, as Datastar splits them. The page load's id is made once,
+   ;; so a stream opened again is this load's: one opened as another load
+   ;; would be taken for a copy of the page, and reloaded.
+   (str "(() => {let load = Math.random().toString(36).slice(2), stream, open = () => {"
+     "stream && stream.abort(); stream = new AbortController(); "
+     "@get(location.href, {headers: {'Tropical-Tab': '" tab "', 'Tropical-Load': load}, "
+     "retry: 'always', requestCancellation: stream" (when open-when-hidden ", openWhenHidden: true") "})}; "
+     "addEventListener('tropical:reopen', open); "
+     ;; Leaving a page hides it, where Datastar closes the stream, unless it
+     ;; is kept open; showing it again, as the back/forward cache restores it,
+     ;; reopens it. Kept open, the stream is cancelled as the page is left
+     ;; instead, and opened again, as the same page load, as it is restored.
+     (when open-when-hidden
+       "addEventListener('pagehide', () => stream.abort()); addEventListener('pageshow', (evt) => evt.persisted && open()); ")
+     "open()})()")))
 
 
 (defn- rendering
@@ -433,7 +447,7 @@
      :body    body}))
 
 
-(deftype StreamBody [session load hold? encoding]
+(deftype StreamBody [session load last-id hold? encoding]
   protocols/StreamableResponseBody
   (write-body-to-stream
     [_ _ out]
@@ -448,7 +462,7 @@
                              (OutputStream/.close out)
                              nil))
                          (EventStream. out))]
-      (session/attach! session stream load)
+      (session/attach! session stream load last-id)
       ;; A sync server ends the response once this returns. An async one may
       ;; keep writing after it, and ends the response when the stream closes.
       (when hold?
@@ -462,7 +476,7 @@
   user's tab is refused, with a reload (`refused-stream`). The stream is
   compressed with the app's encoding the request accepts, if any."
   [app req uid hold?]
-  (let [{:strs [tropical-tab tropical-load accept-encoding]} (:headers req)
+  (let [{:strs [tropical-tab tropical-load last-event-id accept-encoding]} (:headers req)
         session  (when (parse-uuid (str tropical-tab))
                    (kept-by req (session/obtain! tropical-tab uid (with-request app req))))
         encoding (compression/choose (:compression app) accept-encoding)]
@@ -474,7 +488,8 @@
                   (= "HTTP/1.1" (:protocol req)) (assoc "Connection" "keep-alive")
                   (seq (:compression app)) (assoc "Vary" "Accept-Encoding")
                   encoding (assoc "Content-Encoding" (name encoding)))
-       :body    (->StreamBody session tropical-load hold? encoding)}
+       ;; The last event id the client read, which says what it has (`sse/mark!`).
+       :body    (->StreamBody session tropical-load (re-matches #"[0-9a-z.]{1,40}" (str last-event-id)) hold? encoding)}
       (refused-stream req nil))))
 
 
@@ -526,6 +541,49 @@
     (String. (ByteArrayOutputStream/.toByteArray out) StandardCharsets/UTF_8)))
 
 
+(def ^:private reopen-event
+  "Events that reopen the page's stream (`stream-init`)."
+  (let [out    (ByteArrayOutputStream.)
+        stream (EventStream. out)]
+    (sse/script! stream "dispatchEvent(new CustomEvent('tropical:reopen'))")
+    (sse/close! stream)
+    (String. (ByteArrayOutputStream/.toByteArray out) StandardCharsets/UTF_8)))
+
+
+(defn- elsewhere
+  "The tab the action token `token` names, if this process holds no session
+  for it."
+  [token]
+  (when-some [tab (action/token-tab token)]
+    (when (and (parse-uuid tab) (not (session/held? tab)))
+      tab)))
+
+
+(defn- reopen
+  "The answer to an action for `tab`, whose session this process doesn't hold:
+  it is on another server, as when a balancer's stickiness lapsed while the tab
+  sat open, or it ended here, as when the server restarted. The action can't
+  run here, so its page reopens its stream, which rebuilds the tab where it
+  lands, and the action is dropped. The balancer sends the stream where it
+  sent the action, so the two meet again. The old stream ends with its
+  request.
+
+  Datastar's own request gets events that dispatch `tropical:reopen`. A
+  script's gets a 409 with a `Tropical-Reopen` header, on which it dispatches
+  the event itself (`action/use-token`)."
+  [req tab]
+  (log/warn "An action for tab" tab "reached a server that doesn't hold its session: its page reopens its stream."
+    "A balancer's stickiness that lapses while a tab is open does this (see :stream-max-ms), as does a restart.")
+  (if (get-in req [:headers "datastar-request"])
+    {:status  200
+     :headers {"Content-Type"  "text/event-stream; charset=utf-8"
+               "Cache-Control" "no-store"}
+     :body    reopen-event}
+    {:status  409
+     :headers {"Tropical-Reopen" "true"}
+     :body    "This tab's session is on another server: reopen the page's stream."}))
+
+
 (defn- act-response
   "Invokes the action whose token is in the request's `Tropical-Action` header,
   on behalf of `uid`, with the request's body, and `action/*request*` bound to
@@ -533,7 +591,9 @@
   patches or a script's answer; or, for `action/navigate`, events: its
   signals, then a script opening the page, which Datastar runs, with the
   page's nonce in its CSP mode. 403 for another user's action, and 404 for one
-  never minted or since revoked. View updates arrive over the stream."
+  never minted or since revoked. One whose tab's session isn't here is
+  answered by reopening the page's stream (`reopen`). View updates arrive over
+  the stream."
   [app req uid]
   (let [[body refused] (read-body req (:max-signals-bytes app max-signals-bytes))]
     (or refused
@@ -551,7 +611,10 @@
                    :body    (json/write-str result)}
                   {:status 204}))
           :forbidden {:status 403 :body "Not your action."}
-          :gone {:status 404 :body "No such action: never minted, or its island has unmounted."})))))
+          :gone (let [token (get-in req [:headers "tropical-action"])]
+                  (if-some [tab (elsewhere token)]
+                    (reopen req tab)
+                    {:status 404 :body "No such action: never minted, or its island has unmounted."})))))))
 
 
 (defn- refusal
@@ -593,9 +656,13 @@
   Called sync, it holds the stream request's thread for as long as the stream
   is open: run sync handlers on virtual threads.
 
-  Throws for an encoding in `:compression` it can't load."
+  Throws for an encoding in `:compression` it can't load, and for a
+  `:stream-max-ms` that isn't a positive number of ms."
   [app]
   (some-> (:compression app) compression/check!)
+  (when-not (or (nil? (:stream-max-ms app)) (pos-int? (:stream-max-ms app)))
+    (throw (IllegalArgumentException.
+             (str ":stream-max-ms is a positive number of ms, not " (pr-str (:stream-max-ms app)) "."))))
   ;; Whether a page without `ui/page-attrs` has been logged yet.
   (let [app (assoc app ::unkept (atom false))]
     (fn

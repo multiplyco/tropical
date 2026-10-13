@@ -47,6 +47,15 @@ and coalescing come from the runtime and the session pump instead, and are cover
   syntax over the same output was considered and rejected.
 - **Patching the topmost change.** SSE is one ordered stream, so the server knows what the client shows and can diff
   frames by template identity. The whole root is resent only when that is unknown.
+- **A reconnect gets what its page lacks, known by an event id.** Each send ends, in its flush, with a mark: an empty
+  signal patch carrying an SSE id. Datastar keeps the last id it read and sends it back as `Last-Event-ID` on every
+  reconnect of that request: a retry, a hidden tab shown again, a stream the server ended. If it is the mark after what
+  the session last sent, the page has all of it, and gets only what changed since; otherwise it may have any part,
+  and gets the whole root. A marker of its own, not an id on the last patch: Datastar takes an id as it reads its
+  line, before the event is applied, and a marker that is cut short changes nothing. Its ids carry a prefix of the
+  session's own, so a page that moved between servers can't match another session's count. Before, every reconnect
+  resent the whole page, since a write that succeeds says nothing of what arrived; a guess from how long the stream
+  had been quiet was the step before this, and resent the page of any tab that ticks.
 - **Inserting what a list gains.** A list island's template holds a hole per child, so a new child changes the
   template, and the topmost change was the whole list, every child included. When the templates differ only by
   holes added or removed, the rest in order, the added children go out with Datastar's `before`/`after` modes next to
@@ -188,6 +197,29 @@ Atoms remain the user-facing state: `RefSignal` gives each atom one watch, howev
   It also covers a session created as the user signs out, which reads the standing as it renders, where a close
   misses a request already past the middleware. Remembering a user's close for a while, and closing the sessions of
   requests that entered the handler before it, would close that race for `close-user!` too; it waits for a need.
+- **An action that reaches another server moves the stream there.** A balancer's stickiness can lapse under a tab
+  whose stream stays open, and the tab's next action reaches a server without its session. The action can't run
+  there: its closure is on the first server. Reloading the page would bring stream and actions together again, but
+  throws away what the page holds only in the browser, and a form half filled in, left on screen long enough for the
+  stickiness to lapse, is where this happens. So the page reopens its stream instead, as the same page load: the
+  balancer sends it where it sent the action, that server rebuilds the tab from its route, and the page updates in
+  place, keeping its signals. The first server's session, its stream gone, closes after its grace. The action is
+  dropped, not replayed: the rebuilt island may not offer it, or not mean the same by it. A token names its tab, so
+  the server tells this apart from a token revoked on a server that holds the tab, which stays a 404, since the stream
+  already brings that page up to date. A reopen happens only on a click, so it can't loop as a reload could; without
+  any stickiness each click is dropped, and logged. A form still shows what was typed after a dropped Save, which
+  looks like a save that worked, so the event that reopens the stream is the app's too: it fires for a dropped
+  request and nothing else, and the app says so. It carries no detail, since the server that dropped the action
+  doesn't know its token, so it can't say which action it was. A rebuild keeps what the browser holds, and loses
+  what the first server held in memory, which is why stickiness that lasts matters more than this.
+- **Streams can end at an age, for stickiness that lapses.** `:stream-max-ms` ends each stream after that long, and
+  Datastar reconnects it at once to the same session, as the same page load. The reconnect passes the balancer while
+  the tab is open, so a cookie renewed on each response doesn't lapse under it. Its last event id says the page has
+  what it was sent, so it gets only what changed since: usually little, so the page isn't patched as a whole, and a
+  field not bound to a signal isn't touched. Off by default: it costs each open tab a reconnect per period, which
+  stickiness that lasts as long as a tab doesn't need, and which is the better fix where it can be had.
+  A stream ends at a random point in the last tenth of the period, so tabs that connected together, as after a
+  deploy, don't reconnect together.
 - **A failed pump closes its stream.** A session whose own loop throws is closed with its stream, so the client
   reconnects into a new session, instead of staying attached to one that will never send.
 - **Sync Ring streams by holding the thread.** A sync server ends a response once its body is written, so a sync
@@ -532,8 +564,8 @@ reading it, learns the app's layout from it.
 ## The wire
 
 - **Datastar's specification, not its server SDK.** The contract is Datastar's client and its SDK specification. What
-  tropical sends is small (two event types and a comment), so it implements them itself, pinned by tests to the
-  specification byte for byte. Owning the wire makes the stream's lifecycle the response body's own (attach, then hold
+  tropical sends is small (two event types, an event id and a comment), so it implements them itself, pinned by tests
+  to the specification byte for byte. Owning the wire makes the stream's lifecycle the response body's own (attach, then hold
   or return, then close), lets the heartbeat be an SSE comment that touches no client state, and keeps the write path
   free of garbage. The SDK it replaced was a release candidate trailing the client, and allocated about 10 KB per
   event.

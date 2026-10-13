@@ -24,12 +24,17 @@
 
 
 (defn mint
-  "A token bound to `uid`, as `{:value {:token :!handler}, :release f}` for a
-  hold: `release` revokes it. Its handler is `!handler`'s, a fn of the
-  request's JSON body."
+  "A token bound to `uid`, minted by the session of `tab`, as
+  `{:value {:token :!handler}, :release f}` for a hold: `release` revokes it.
+  Its handler is `!handler`'s, a fn of the request's JSON body.
+
+  The token names its tab, before a random part (`token-tab`), so a server
+  that doesn't know a token can tell whether it holds the tab's session. They
+  are joined by a `_`, which neither has, and not a `.`, since a token is also
+  a key in a signal's path."
   {:no-doc true}
-  [uid]
-  (let [token    (str (random-uuid))
+  [uid tab]
+  (let [token    (str tab "_" (random-uuid))
         !handler (atom nil)]
     (swap! !actions assoc token {:uid uid :!handler !handler})
     {:value   {:token token :!handler !handler}
@@ -44,12 +49,25 @@
 
   The primitive under `use-action`, for a script that posts to the page's URL
   itself, with the token in a `Tropical-Action` header, and reads the answer:
-  a map the handler returns, as JSON. `co.multiply.tropical.upload` is one."
+  a map the handler returns, as JSON. `co.multiply.tropical.upload` is one.
+
+  An answer with a `Tropical-Reopen` header, a 409, says the request reached a
+  server that doesn't hold the tab's session (see `co.multiply.tropical.ring`):
+  the script dispatches a `tropical:reopen` event on `window`, which reopens
+  the page's stream, and the request is dropped."
   [k handler]
-  (let [{:keys [uid]} (island/use-session)
-        {:keys [token !handler]} (island/use-hold k #(mint uid))]
+  (let [{:keys [uid tab]} (island/use-session)
+        {:keys [token !handler]} (island/use-hold k #(mint uid tab))]
     (reset! !handler handler)
     token))
+
+
+(defn ^:no-doc token-tab
+  "The tab whose session minted `token`, or nil if it names none."
+  [token]
+  (let [i (str/last-index-of (str token) "_")]
+    (when (and i (pos? (long i)))
+      (subs token 0 i))))
 
 
 ;; Bound by `co.multiply.tropical.ring` while an action's handler runs. Without

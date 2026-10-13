@@ -68,7 +68,19 @@ The list that renders the rows reads the items, so the archived one goes from ev
   typed into a field bound to one.
 - **A script's own requests.** `use-token` gives an action's token alone, for a script that posts to the page itself,
   with the token in the `Tropical-Action` header, and reads the answer: the handler gets the request's JSON, and a
-  map it returns comes back as JSON. Uploads are built on it.
+  map it returns comes back as JSON. Uploads are built on it. An answer with a `Tropical-Reopen` header, a 409, says
+  the request reached a server that doesn't hold the tab's session: the script dispatches `tropical:reopen` on
+  `window`, which reopens the page's stream there, and drops the request ([Serving pages](serving.md#running-it)).
+- **A dropped action.** An action that reaches a server without the tab's session, as when a balancer's stickiness
+  lapsed, is dropped, and the page reopens its stream there. A form still shows what the user typed, so a dropped Save
+  looks like one that worked: say that it didn't. The page dispatches `tropical:reopen` on `window` as it reopens,
+  and for nothing else, so a notice can follow it, shown by a signal, which survives the page's rebuild where an
+  element a script adds to an island doesn't:
+
+  ```clojure
+  [:div {:data-on:tropical:reopen__window "$_dropped = true" :data-show "$_dropped" :style "display: none"}
+   "That didn't go through. Try again."]
+  ```
 - **Navigation.** A handler that returns `(navigate path)` answers with a script that opens `path` as a page load,
   pushed onto the tab's history, or replacing its entry with `{:replace true}`. Datastar runs it, with the page's nonce
   in its CSP mode. With `{:signals m}`, the answer carries the signals the handler would return if it didn't navigate,

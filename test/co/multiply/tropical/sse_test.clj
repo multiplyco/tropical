@@ -51,6 +51,10 @@
     (let [[s written] (open-stream)]
       (is (true? (sse/signals! s {"a" 1 "b" {"c" "d"}})))
       (is (= "event: datastar-patch-signals\ndata: signals {\"a\":1,\"b\":{\"c\":\"d\"}}\n\n" (written)))))
+  (testing "a mark: an empty signal patch with an id, which the client sends back as Last-Event-ID"
+    (let [[s written] (open-stream)]
+      (is (true? (sse/mark! s "k3x.7")))
+      (is (= "event: datastar-patch-signals\nid: k3x.7\ndata: signals {}\n\n" (written)))))
   (testing "a heartbeat is a comment, which the client ignores"
     (let [[s written] (open-stream)]
       (is (true? (sse/heartbeat! s)))

@@ -47,12 +47,14 @@
   `uploads` the list as the island last rendered it."
   [uid opts]
   (let [!out (atom nil)
-        {:keys [step rt]} (harness #(files !out opts) {:tab (str (random-uuid)) :uid uid})
+        ;; Not a tab id: no server holds the harness's session, so its
+        ;; revoked tokens read as revoked, not as another server's.
+        {:keys [step rt]} (harness #(files !out opts) {:tab "tab" :uid uid})
         html (island/html (step))]
     {:step    step
      :rt      rt
      :html    html
-     :token   (re-find #"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}" html)
+     :token   (re-find #"tab_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}" html)
      :out     !out
      :uploads #(:uploads @!out)}))
 
