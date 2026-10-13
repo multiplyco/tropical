@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.0 - 2026-10-13
+
+- Add `session/close-user!`, which closes a user's sessions, as when they sign out or are removed: their islands
+  unmount, their actions are revoked, and their tabs reconnect through the route's middleware, which refuses a user no
+  longer signed in, so each page reloads into the app's own answer. It reaches the sessions of its own JVM. The
+  Security guide covers signing out, on one server and on several, where a root island following the user's standing
+  covers every server.
+- Add a guide to web components made with Datastar's Rocket, which the demo's `<star-rating>` follows, and the skill's
+  points on them. No change to the library.
+
 ## 0.1.0 - 2026-10-10
 
 - Islands as functions (`defisland`), rendered per browser tab on the server and patched into the page by Datastar:

@@ -16,7 +16,7 @@ its islands, functions returning hiccup, and sends what changed over one SSE str
 by element id. Writes come back as actions: closures rendered into the page as tokens, posted with Datastar's signals.
 
 **Repository**: https://github.com/multiplyco/tropical —
-`co.multiply/tropical {:mvn/version "0.1.0"}`, JDK 25+, Clojure 1.12+, Datastar 1.0.4 in the browser.
+`co.multiply/tropical {:mvn/version "0.2.0"}`, JDK 25+, Clojure 1.12+, Datastar 1.0.4 in the browser.
 
 This file covers what you can't infer: where a reasonable guess from React, Electric, htmx or a Datastar server SDK is
 wrong. It is not an API reference. The app-facing vars and namespaces carry thorough docstrings, so for signatures and
@@ -264,6 +264,10 @@ plain function returning hiccup, called inside islands.
 - **An open stream isn't checked again.** Middleware that checks access runs when the stream connects. A user who
   loses access while the page is open keeps its live updates until the stream reconnects. Read access in the islands
   (`observe`), or close the user's sessions when it changes.
+- **Signing out:** end the sign-in, then `(session/close-user! uid)`. The user's tabs reconnect, the middleware
+  refuses them, and each page reloads into the app's answer. It closes only this JVM's sessions: on several servers,
+  tell each, or have the root island read the user's standing from the database with `observe` and render
+  `(action/navigate-element "/sign-in")` once it changes, which every server's sessions follow, late ones included.
 - **`:first-frame-ms`** lets a cold page wait that long for its reads, so it arrives rendered instead of pending.
   100 to 200 ms. Later frames never wait.
 - **The CSP**: Datastar needs `'unsafe-eval'` unless the page puts its nonce on `<html data-nonce=...>`. Leave the

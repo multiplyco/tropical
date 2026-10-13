@@ -602,6 +602,24 @@
   (run! close! (vals @!sessions)))
 
 
+(defn close-user!
+  "Closes every session of the user `uid` in this JVM, as when they sign out or
+  are removed: their islands unmount, their actions are revoked, and their
+  tabs' streams end. Datastar reconnects each about a second later, through the
+  route's middleware. Once the app has ended the user's sign-in, that refuses
+  the stream, and `ring/wrap-refused-streams` reloads the page into the app's
+  own answer, such as its sign-in page. A user still signed in reconnects into
+  a fresh session.
+
+  End the sign-in first: a tab that reconnects before that gets a fresh session.
+  A request that passed the middleware before the sign-in ended, and creates
+  its session after this, keeps it. With several servers, each closes its own
+  sessions, so the app tells every one of them. The Security guide has an
+  island that follows the user's standing instead, which covers both."
+  [uid]
+  (run! close! (filter #(= uid (:uid %)) (vals @!sessions))))
+
+
 (defn summary
   "How many sessions have their stream, and how many are waiting for it, as
   `{:attached :detached}`. Of every session, or of `sessions`, a value

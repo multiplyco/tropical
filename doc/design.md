@@ -181,6 +181,13 @@ Atoms remain the user-facing state: `RefSignal` gives each atom one watch, howev
   ends Datastar's retries. The load told to reload is exempt because Datastar retries a finished stream after a
   second, and a slow reload lets that retry out first. An open stream isn't asked again: what the page shows going
   away while it is open, access included, is for the islands to read and render.
+- **Signing out closes the sessions where they are.** `close-user!` closes the user's sessions in its own JVM, and
+  their reconnects meet the middleware, which refuses them. A session lives in one server's memory, and tropical has
+  no channel between servers, nor wants one: an app on several already shares a database or a bus. The form that
+  covers every server is a read: the root island follows the user's standing, where every server's sessions read it.
+  It also covers a session created as the user signs out, which reads the standing as it renders, where a close
+  misses a request already past the middleware. Remembering a user's close for a while, and closing the sessions of
+  requests that entered the handler before it, would close that race for `close-user!` too; it waits for a need.
 - **A failed pump closes its stream.** A session whose own loop throws is closed with its stream, so the client
   reconnects into a new session, instead of staying attached to one that will never send.
 - **Sync Ring streams by holding the thread.** A sync server ends a response once its body is written, so a sync

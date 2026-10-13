@@ -199,7 +199,8 @@ until the response ends. The page and the actions are left to the server's compr
 - **A tab's requests go to one server.** A session lives in the memory of the server that created it, and a tab's
   stream and its actions must reach that server: behind a load balancer, keep a tab on one server, as sticky sessions
   do. An action that reaches another server gets a 404, and changes nothing. A stream that reaches another server, as
-  after a deploy, rebuilds the tab there from its route.
+  after a deploy, rebuilds the tab there from its route. Signing a user out closes their sessions on every server
+  ([Security](security.md#sessions-and-authentication)).
 - **Heartbeats.** A dead connection is only noticed on write, so a quiet stream writes a heartbeat every 10 s
   (`session/heartbeat-ms`): an SSE comment, which the client ignores, and which keeps the idle timeouts of proxies
   along the way from closing it.

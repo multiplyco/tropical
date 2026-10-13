@@ -53,6 +53,29 @@ Everything from the browser is the user's to change, whatever the page's script 
 - **An open stream isn't checked again.** The route's middleware runs as a stream connects. A user who loses access
   while the page is open keeps the stream, and its updates, until it reconnects. Read access in the islands, as a read
   that follows it, so a render answers the change; a refused reconnect reloads the page into the app's own answer.
+- **Signing a user out.** End the sign-in, then `(session/close-user! uid)`. It closes the user's sessions: their
+  islands unmount, their actions are revoked, and their streams end. Each tab reconnects about a second later
+  through the route's middleware, which refuses a user no longer signed in, and the page reloads into the app's own
+  answer, such as its sign-in page (`ring/wrap-refused-streams`). In that order: a tab that reconnects before the
+  sign-in ends gets a fresh session. So does a request that passed the middleware before then, and creates its
+  session after the close.
+- **On several servers, each closes its own.** `close-user!` reaches the sessions of the JVM it runs in, so the app
+  tells every server, over what they share. Or the root island follows the user's standing, read from where every
+  server reads it, such as the database:
+
+  ```clojure
+  ;; `user-standing` emits the user's standing as the database has it, such as `:active` or `:signed-out`.
+  (defisland root
+    [uid]
+    (if (= :signed-out (observe uid user-standing))
+      (action/navigate-element "/sign-in")
+      (app uid)))
+  ```
+
+  Every server's sessions read the change, without being told, and a session created late reads it as it renders.
+  Until the read lands, `observe` returns `pending`, and the app renders, as the request that created the session
+  passed the middleware. Once the standing changes, the app's islands unmount, so their reads close and their actions
+  are revoked, and the tab opens the sign-in page.
 
 ## What the page runs
 

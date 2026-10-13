@@ -222,6 +222,31 @@
     (is (deref (:closed (first sessions)) 1000 false))))
 
 
+(defisland go-button
+  []
+  [:button {:data-on:click (use-action :go (fn [_] nil))} "Go"])
+
+
+(deftest closing-a-user-closes-their-sessions-only
+  (with-redefs [sse/together (fn [_ f] (f))
+                sse/close! (fn [_] true)]
+    (let [uid    (str (random-uuid))
+          tokens #(count (filter (fn [[_ v]] (= uid (:uid v))) @action/!actions))
+          app    {:root (fn [_] (go-button))}
+          mine   (doall (repeatedly 2 #(session/create! (str (random-uuid)) uid app)))
+          theirs (session/create! (str (random-uuid)) (str (random-uuid)) app)]
+      (run! session/render-page! (conj mine theirs))
+      (is (= 2 (tokens)))
+      (session/close-user! uid)
+      (is (every? #(deref (:closed %) 1000 false) mine))
+      (is (not-any? #(contains? @session/!sessions (:tab %)) mine))
+      (is (zero? (tokens)) "their actions are revoked")
+      (is (not (realized? (:closed theirs))) "another user's session stays")
+      (is (identical? theirs (get @session/!sessions (:tab theirs))))
+      (session/close! theirs)
+      (is (deref (:closed theirs) 1000 false)))))
+
+
 (defn- fresh-key
   []
   [::read (random-uuid)])
