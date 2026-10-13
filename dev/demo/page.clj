@@ -966,8 +966,8 @@
 (defn error-view
   "What renders in place of an island that failed: the default view, plus the
   exception's message. A page for others shouldn't show it; this is a demo."
-  [id e]
-  (conj (island/error-view id e) " " (or (ex-message e) (str (class e)))))
+  [{:keys [error] :as failure}]
+  (conj (island/error-view failure) " " (or (ex-message error) (str (class error)))))
 
 
 (defn root

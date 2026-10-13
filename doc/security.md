@@ -97,7 +97,8 @@ Everything from the browser is the user's to change, whatever the page's script 
   app's names for them. They aren't secrets, since a name can be guessed and checked, but the page tells nothing of
   the app's namespaces, functions and states ([design](design.md#names-the-browser-sees)).
 - **A failed island says only that it failed.** The default error view shows no exception message, which can carry
-  what the user shouldn't see. The exception goes to the log.
+  what the user shouldn't see, only a reference made for the failure: random characters, which tell nothing of it. The
+  exception goes to the log, with the reference. What an app's or an island's own view renders reaches the client.
 
 ## Compression
 

@@ -31,8 +31,9 @@
                       created it.
   - `:patch-signals`  optional, `(fn [info] signals)`: a map of signals to send
                       with each patch, or nil. See `patch-signals`.
-  - `:error-view`     optional, `(fn [id e] hiccup)`: what renders in place of
-                      an island whose render throws (see `runtime/runtime`).
+  - `:error-view`     optional, `(fn [failure] hiccup)`: what renders in place
+                      of an island whose render throws, unless the island has
+                      a view of its own (see `island/error-view`).
   - `:first-frame-ms` optional: how long, in ms, the session's first frame may
                       wait for reads still pending (below). Defaults to 0.
 

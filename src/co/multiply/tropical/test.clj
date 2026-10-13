@@ -43,9 +43,9 @@
   `opts`:
   - `:uid`, the session's user, which `use-session` returns and actions are
     bound to; `\"user\"` by default. `:tab`, the session's tab.
-  - `:error-view`, `(fn [id e] hiccup)`, rendered in place of an island whose
-    render throws, as the app's is. The default is the library's. `failures`
-    has the exceptions either way.
+  - `:error-view`, `(fn [failure] hiccup)`, rendered in place of an island
+    whose render throws, as the app's is. The default is the library's.
+    `failures` has the failures either way.
   - `:request`, the Ring request that created the session, which
     `use-session` returns, and the one an action's handler gets from
     `action/request`, which in a session is the action's own. Without one,
@@ -55,11 +55,9 @@
   (^java.lang.AutoCloseable [root {:keys [uid tab error-view request] :or {uid "user" tab "tab"}}]
    (let [inbox     (Inbox.)
          !failures (atom [])
-         view      (or error-view island/error-view)
          rt        (runtime/runtime (cond-> {:tab tab :uid uid} request (assoc :request request)) inbox
-                     {:error-view (fn [id e]
-                                    (swap! !failures conj {:island id :error e})
-                                    (view id e))})]
+                     {:error-view error-view
+                      :on-failure #(swap! !failures conj %)})]
      (->Harness rt inbox root uid request !failures))))
 
 
@@ -127,7 +125,8 @@
 
 
 (defn failures
-  "The renders that threw, since the harness was made, in order: each
-  `{:island id :error e}`."
+  "The renders that threw, since the harness was made, in order: each the
+  failure its error view got (`island/error-view`), with its `:path` and
+  `:error`."
   [{:keys [!failures]}]
   @!failures)

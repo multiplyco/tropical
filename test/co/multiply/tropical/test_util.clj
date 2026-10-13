@@ -1,5 +1,6 @@
 (ns co.multiply.tropical.test-util
   (:require
+    [clojure.tools.logging.impl :as log-impl]
     [co.multiply.tropical.hooks :refer [observe]]
     [co.multiply.tropical.resource :as resource]
     [co.multiply.tropical.runtime :as runtime])
@@ -11,8 +12,8 @@
 (defn message-view
   "An error view that shows the exception's message, so tests can tell which
   failure an island rendered."
-  [id e]
-  [:div "Island " id " failed to render: " (ex-message e)])
+  [{:keys [path error]}]
+  [:div "Island " path " failed to render: " (ex-message error)])
 
 
 (defn harness
@@ -32,6 +33,21 @@
               (let [changed (ArrayList.)]
                 (Inbox/.drain inbox changed)
                 (runtime/frame! rt (root-fn) changed)))})))
+
+
+(defn capturing
+  "A logger factory that keeps what is logged, as `[level message throwable]`,
+  in `!logged`."
+  [!logged]
+  (reify log-impl/LoggerFactory
+    (name [_] "capturing")
+
+    (get-logger
+      [_ _]
+      (reify log-impl/Logger
+        (enabled? [_ _] true)
+
+        (write! [_ level throwable message] (swap! !logged conj [level (str message) throwable]))))))
 
 
 (defn observe-source

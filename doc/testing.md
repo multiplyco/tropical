@@ -20,7 +20,8 @@ or browser:
   doesn't render it, which is how a test sees a gate. The signals pass through JSON, as the browser's do, so the
   handler gets string keys. With `:request` in the harness's options, `use-session` has it as the request that
   created the session, and the handler's `action/request` returns it.
-- **`failures`** lists the renders that threw, with their exceptions, which the page would show only as the error view.
+- **`failures`** lists the renders that threw, which the page would show only as an error view: each the failure the
+  view got, with the island's id under `:path` and the exception under `:error`, whichever view rendered it.
 - **Closing the harness** unmounts its islands: their resources start to linger and their action tokens are revoked.
 - **Renders run in the caller's scope.** Bind with `scoping` what the route's middleware would bind for a session.
 - **Sources are the app's.** An island reading through the app's own function over `observe` reads what that function

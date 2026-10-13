@@ -20,7 +20,8 @@
     [co.multiply.tropical.resource :as resource])
   (:import
     [co.multiply.tropical.island Js]
-    [co.multiply.tropical.signal Inbox Sub]))
+    [co.multiply.tropical.signal Inbox Sub]
+    [java.util.concurrent ThreadLocalRandom]))
 
 
 ;; Instance: what the runtime keeps per mounted island, keyed by its id.
@@ -41,16 +42,19 @@
   "A runtime for the session `ctx` (`{:tab :uid :request}`, which
   `use-session` returns), subscribing through `inbox`.
 
-  `:error-view`, `(fn [id e] hiccup)`, renders in place of island `id` when its
-  render throws `e`. It defaults to `island/error-view`, which says only that
-  the island failed: what it shows reaches the client, and an exception's
-  message can carry what the user shouldn't see."
+  `:error-view`, `(fn [failure] hiccup)`, renders in place of an island whose
+  render throws, unless the island has one of its own. It defaults to
+  `island/error-view`, which says only that the island failed: what it shows
+  reaches the client, and an exception's message can carry what the user
+  shouldn't see. `:on-failure`, `(fn [failure])`, is called with each failure,
+  whichever view renders it."
   ([ctx inbox]
    (runtime ctx inbox nil))
-  ([ctx inbox {:keys [error-view]}]
+  ([ctx inbox {:keys [error-view on-failure]}]
    {:ctx        ctx
     :inbox      inbox
-    :error-view (or error-view island/error-view)
+    :error-view error-view
+    :on-failure on-failure
     :!instances (volatile! {})
     :!root-id   (volatile! nil)
     ;; source -> Sub, one per source however many islands read it. The Sub's
@@ -99,15 +103,61 @@
   (into #{} (map :sub) reads))
 
 
+(defn- fatal?
+  "Whether `t` leaves the JVM in no state to go on, as running out of memory
+  does. A render's other throwables, an `AssertionError` from `assert` or a
+  `:pre` among them, are the island's failure. A stack overflow is too, since
+  its stack has unwound by the time it is caught."
+  [t]
+  (and (instance? VirtualMachineError t) (not (instance? StackOverflowError t))))
+
+
+(def ^:private ref-chars
+  "Crockford's base 32: digits and letters, without the I, L, O and U that read
+  as other characters."
+  "0123456789ABCDEFGHJKMNPQRSTVWXYZ")
+
+
+(defn- reference
+  "A failure's reference: 40 random bits, as `4KF7-Q2XM`, short enough to read
+  out."
+  []
+  (let [r  (ThreadLocalRandom/current)
+        sb (StringBuilder. 9)]
+    (dotimes [i 8]
+      (when (= i 4)
+        (StringBuilder/.append sb \-))
+      (StringBuilder/.append sb (String/.charAt ref-chars (ThreadLocalRandom/.nextInt r 32))))
+    (str sb)))
+
+
 (defn- error-template
-  "The template of the app's error view for island `id`, whose render threw `e`,
-  or of the default one if the app's throws too."
-  [rt id e]
-  (try
-    (island/compile-island id ((:error-view rt) id e))
-    (catch Exception e2
-      (log/error e2 "The error view of island" id "failed to render.")
-      (island/compile-island id (island/error-view id e)))))
+  "Logs the failure of island `id`, placed by `call`, whose render threw `t`, and
+  returns the template of its error view: the island's own, else the app's,
+  else the default. One that throws gives way to the next."
+  [rt id call t]
+  (let [{island-name :name, :keys [error-view]} (island/call-island call)
+        failure {:ref        (reference)
+                 :error      t
+                 :island     island-name
+                 :path       id
+                 :element-id (island/element-id id)
+                 :args       (island/call-args call)
+                 :session    (:ctx rt)}]
+    (log/error t (str "Island " id " (" island-name ", element " (:element-id failure) ") failed to render. "
+                   "Reference " (:ref failure) "."))
+    (when-some [on-failure (:on-failure rt)]
+      (on-failure failure))
+    (loop [[view & more] (distinct (remove nil? [error-view (:error-view rt) island/error-view]))]
+      (if-not more
+        (island/compile-island id (view failure))
+        (or (try
+              (island/compile-island id (view failure))
+              (catch Throwable t2
+                (when (fatal? t2) (throw t2))
+                (log/error t2 (str "The error view of island " id " failed to render. Reference " (:ref failure) "."))
+                nil))
+          (recur more))))))
 
 
 (defn- signals-js
@@ -142,7 +192,7 @@
   "Renders `call` with hooks bound and settles what the render held and read
   against the previous render of `inst`. Returns the updated instance. A render
   that throws renders the error view instead, keeping only what it held and read
-  before throwing."
+  before throwing, unless what it threw is `fatal?`."
   [rt {:keys [id] :as inst} call]
   (let [!holds    (volatile! {})
         !reads    (volatile! [])
@@ -185,9 +235,9 @@
                                (island/compile-island id node
                                  (when-some [signals @!signals]
                                    {:data-signals__ifmissing (signals-js signals)})))
-                             (catch Exception e
-                               (log/error e "Island" id (str "(element " (island/element-id id) ")") "failed to render.")
-                               (error-template rt id e))))
+                             (catch Throwable t
+                               (when (fatal? t) (throw t))
+                               (error-template rt id call t))))
         holds     @!holds
         reads     @!reads
         kept?     (same-slots? (:calls inst) calls)]

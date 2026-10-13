@@ -29,6 +29,10 @@ boundaries.
 - **The root element's id is the island's.** An island that sets one on its root fails, and one whose root isn't an
   element is wrapped in a `:div`. An element the app needs to find, from a script or a label's `for`, gets an id of its
   own, inside.
+- **A failure stays in its island.** A render that throws renders an error view in the island's place: its children
+  unmount, and the rest of the page goes on. The app's `:error-view` replaces the default, and an island's own replaces
+  the app's for that island: `(defisland chart {:error-view chart-failed} [series] ...)` ([Serving
+  pages](serving.md#failures)).
 - **A key is the island's identity, as in React.** An island under a new key is a new one: it starts over, its state,
   holds and actions fresh, and the old one unmounts. So to start an island over, such as a dialog opened again, change
   its key: `{:key :opened-at}`. Only the new island is sent, in the old one's place, not its parent.

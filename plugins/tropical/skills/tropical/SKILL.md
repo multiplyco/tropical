@@ -16,7 +16,7 @@ its islands, functions returning hiccup, and sends what changed over one SSE str
 by element id. Writes come back as actions: closures rendered into the page as tokens, posted with Datastar's signals.
 
 **Repository**: https://github.com/multiplyco/tropical —
-`co.multiply/tropical {:mvn/version "0.2.0"}`, JDK 25+, Clojure 1.12+, Datastar 1.0.4 in the browser.
+`co.multiply/tropical {:mvn/version "0.3.0"}`, JDK 25+, Clojure 1.12+, Datastar 1.0.4 in the browser.
 
 This file covers what you can't infer: where a reasonable guess from React, Electric, htmx or a Datastar server SDK is
 wrong. It is not an API reference. The app-facing vars and namespaces carry thorough docstrings, so for signatures and
@@ -65,6 +65,12 @@ skill is available, load it for those.
   The page sees an opaque digest of the path as the element id.
 - **Tropical owns the root element's `id`.** Setting one fails the island. A root that isn't an element is wrapped in
   a `:div`. An element the app needs to find from a script gets an id of its own, inside.
+- **A failure stays in its island.** A render that throws, an `assert` included, renders an error view in its place:
+  its children unmount, the rest of the page goes on. The app map's `:error-view`, `(fn [failure] hiccup)`, replaces
+  the default; `defisland`'s `{:error-view f}` replaces the app's for one island. `failure` has `:ref`, a reference
+  also in the log line, `:error`, `:island`, `:path`, `:element-id`, `:args` and `:session`. A view's output reaches
+  the browser: show the reference, not the message. Not React's error boundaries: a child's failure never reaches its
+  parent, so a parent can't catch it.
 - **A key is identity.** An island under a new key starts over: its state, holds and actions fresh. To start a dialog
   over each time it opens, key it by when it opened.
 - **Hooks are keyed by name, not by call order.** Conditionals and loops around hooks are fine. A render asks for each
@@ -295,7 +301,8 @@ plain function returning hiccup, called inside islands.
   (1000); `{:wait-ms 0}` shows the pending state.
 - `action` finds an action by its island's path and its key, as a fn of the signals (and a value), or nil if the
   island doesn't render it: that is how to test a gate. Signals pass through JSON, so the handler gets string keys.
-- `mounted` lists the islands' paths; `failures` the renders that threw, with their exceptions.
+- `mounted` lists the islands' paths; `failures` the renders that threw, each the failure its view got (`:path`,
+  `:error`, ...).
 - Closing the harness unmounts everything: its resources linger, its tokens are revoked.
 - Renders run in the caller's scope: bind with `scoping` what the route's middleware would.
 - `:request` in the harness's options is the request that created the session, which `use-session` returns, and the
@@ -308,7 +315,7 @@ plain function returning hiccup, called inside islands.
 - `-Dco.multiply.tropical.readable-names=true` shows the app's names in the page instead of digests.
   `(island/element-id path)` maps a path to its digest.
 - `(resource/summary)` lists the open resources, their readers and state.
-- A failed island is logged with its path and its element id.
+- A failed island is logged with its path, its element id and its reference, which the default view shows the user.
 
 ## Traps
 

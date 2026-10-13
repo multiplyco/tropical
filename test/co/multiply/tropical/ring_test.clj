@@ -3,7 +3,6 @@
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing]]
     [clojure.tools.logging :as log]
-    [clojure.tools.logging.impl :as log-impl]
     [co.multiply.quiescent :as q]
     [co.multiply.scoped :refer [ask scoping]]
     [co.multiply.tropical.action :as action :refer [use-action]]
@@ -11,7 +10,7 @@
     [co.multiply.tropical.ring :as ring]
     [co.multiply.tropical.runtime :as runtime]
     [co.multiply.tropical.session :as session]
-    [co.multiply.tropical.test-util :refer [datastar-statement harness]]
+    [co.multiply.tropical.test-util :refer [capturing datastar-statement harness]]
     [dev.onionpancakes.chassis.core :as h]
     [ring.core.protocols :as protocols]
     [s-exp.oda :as json])
@@ -599,20 +598,6 @@
     (is (thrown-with-msg? IllegalStateException #"stream" (handler (request :get "/mounted" uid {})))
       "it would render, and never update")
     (is (eventually #(empty? (filter (fn [s] (= uid (:uid s))) (vals @session/!sessions)))) "and its session closes")))
-
-
-(defn- capturing
-  "A logger factory that keeps what is logged, as `[level message]`, in `!logged`."
-  [!logged]
-  (reify log-impl/LoggerFactory
-    (name [_] "capturing")
-
-    (get-logger
-      [_ _]
-      (reify log-impl/Logger
-        (enabled? [_ _] true)
-
-        (write! [_ level _ message] (swap! !logged conj [level (str message)]))))))
 
 
 (deftest a-page-without-page-attrs-is-logged-once

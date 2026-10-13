@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.0 - 2026-10-13
+
+- Breaking: an error view is `(fn [failure] hiccup)`, where it was `(fn [id e] hiccup)`. `failure` is a map: the
+  failure's reference (`:ref`), the exception (`:error`), the island's qualified name (`:island`), its id (`:path`)
+  and its element's (`:element-id`), its `:args`, and the session's `{:tab :uid :request}` (`:session`). The test
+  harness's `failures` lists these maps, so the island's id is under `:path`, where it was under `:island`.
+- Each failed render gets a reference, as `4KF7-Q2XM`, logged with the exception. The default error view shows it, for
+  the user to report.
+- An island can have an error view of its own, in `defisland`'s options (`{:error-view f}`), which replaces the app's
+  for that island. A view that throws gives way to the app's, and the app's to the default.
+- What an island's render throws is the island's failure, an `AssertionError` from `assert` or a `:pre` included,
+  where only an `Exception` was: any other error closed the session. What leaves the JVM in no state to go on, such as
+  running out of memory, still does.
+
 ## 0.2.0 - 2026-10-13
 
 - Add `session/close-user!`, which closes a user's sessions, as when they sign out or are removed: their islands

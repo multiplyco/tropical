@@ -2,10 +2,11 @@
   (:require
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing]]
+    [clojure.tools.logging :as log]
     [co.multiply.tropical.action :refer [use-action]]
     [co.multiply.tropical.island :as island :refer [defisland use-state use-watch]]
     [co.multiply.tropical.runtime :as runtime]
-    [co.multiply.tropical.test-util :refer [harness]]
+    [co.multiply.tropical.test-util :refer [capturing harness]]
     [dev.onionpancakes.chassis.core :as h])
   (:import
     [java.io StringReader StringWriter]
@@ -292,11 +293,127 @@
         (is (str/includes? out (str "id=\"" (island/element-id "boom") "\"")))
         (is (not (re-find #"secret" out)))))
     (testing "an app's view gets the island's id and the exception"
-      (is (re-find #">boom: secret<" (html {:error-view (fn [id e] [:p id ": " (ex-message e)])}))))
+      (is (re-find #">boom: secret<"
+            (html {:error-view (fn [{:keys [path error]}] [:p path ": " (ex-message error)])}))))
     (testing "an app's view that throws falls back to the default"
-      (let [out (html {:error-view (fn [_ _] (throw (ex-info "worse" {})))})]
+      (let [out (html {:error-view (fn [_] (throw (ex-info "worse" {})))})]
         (is (str/includes? out (str "id=\"" (island/element-id "boom") "\"")))
         (is (not (re-find #"secret|worse" out)))))))
+
+
+(defisland failing
+  {:key identity}
+  [n]
+  (throw (ex-info (str "failing " n) {})))
+
+
+(defisland failing-host
+  []
+  [:div (failing 7)])
+
+
+(deftest an-error-view-gets-the-failure
+  (let [!seen (atom nil)
+        ctx   {:tab "tab" :uid "user"}
+        {:keys [step rt]} (harness failing-host ctx {:error-view (fn [failure] (reset! !seen failure) [:p "failed"])})]
+    (try
+      (step)
+      (let [{:keys [ref error island path element-id args session]} @!seen]
+        (is (re-matches #"[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}" ref))
+        (is (= "failing 7" (ex-message error)))
+        (is (= `failing island) "the island's qualified name")
+        (is (= "failing-host/failing.7" path))
+        (is (= (island/element-id path) element-id))
+        (is (= [7] args))
+        (is (= ctx session)))
+      (finally
+        (runtime/dispose! rt)))))
+
+
+(deftest a-failures-reference-is-in-its-log-line-and-the-default-view
+  (let [!logged (atom [])
+        {:keys [step rt]} (harness failing-host {:tab "tab" :uid "user"} {})
+        html    (binding [log/*logger-factory* (capturing !logged)]
+                  (island/html (step)))
+        ref     (second (re-find #"Reference (\w{4}-\w{4})" html))]
+    (runtime/dispose! rt)
+    (is (some? ref) "the default view shows it")
+    (is (not (str/includes? html "failing 7")) "and not the exception's message")
+    (is (some (fn [[level message t]]
+                (and (= :error level) (str/includes? message ref) (= "failing 7" (ex-message t))))
+          @!logged)
+      "the line logging the exception has it")))
+
+
+(defisland own-view
+  {:error-view (fn [{:keys [path]}] [:p "own " path])}
+  []
+  (throw (ex-info "own" {})))
+
+
+(defisland own-view-throws
+  {:error-view (fn [_] (throw (ex-info "worse" {})))}
+  []
+  (throw (ex-info "own" {})))
+
+
+(defisland views-host
+  []
+  [:div (own-view) (own-view-throws) (failing 1)])
+
+
+(deftest an-islands-error-view-comes-before-the-apps
+  (let [html (fn [opts]
+               (let [{:keys [step rt]} (harness views-host {:tab "tab" :uid "user"} opts)]
+                 (try
+                   (island/html (step))
+                   (finally
+                     (runtime/dispose! rt)))))]
+    (let [out (html {:error-view (fn [_] [:p "app's"])})]
+      (is (str/includes? out ">own views-host/own-view<") "the island's own")
+      (is (= 2 (count (re-seq #">app's<" out))) "the app's, for an island without one and one whose own threw"))
+    (let [out (html {})]
+      (is (str/includes? out ">own views-host/own-view<"))
+      (is (= 2 (count (re-seq #"failed to render" out))) "without the app's, the default"))
+    (is (= 2 (count (re-seq #"failed to render" (html {:error-view (fn [_] (throw (ex-info "worst" {})))}))))
+      "after an app's that throws, the default")))
+
+
+(defisland asserting
+  []
+  (assert (= 1 2) "a precondition")
+  [:p "unreachable"])
+
+
+(defisland overflowing
+  []
+  (letfn [(deeper [n] (inc (deeper n)))]
+    [:p (deeper 0)]))
+
+
+(defisland out-of-memory
+  []
+  (throw (OutOfMemoryError. "a test's")))
+
+
+(defisland errors-host
+  []
+  [:div (asserting) (overflowing) [:p "the rest"]])
+
+
+(deftest errors-are-the-islands-unless-fatal
+  (let [{:keys [step rt]} (harness errors-host)]
+    (try
+      (let [out (island/html (step))]
+        (is (= 2 (count (re-seq #"failed to render" out))) "a failed assertion and a stack overflow")
+        (is (str/includes? out "the rest")))
+      (finally
+        (runtime/dispose! rt))))
+  (let [{:keys [step rt]} (harness out-of-memory)]
+    (try
+      (is (thrown? OutOfMemoryError (step)) "running out of memory goes past the island, to the session")
+      (finally
+        (runtime/dispose! rt)))))
 
 
 (deftest hooks-only-run-in-a-render

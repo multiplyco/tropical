@@ -49,7 +49,7 @@
 ;; Calls ------------------------------------------------------------------------
 
 
-(deftype Call [slot render args]
+(deftype Call [slot render args island]
   h/Node
   (branch? [_] false)
   (children [_] nil)
@@ -77,6 +77,14 @@
   (.-args call))
 
 
+(defn ^:no-doc call-island
+  "What the island's definition says of it, the same for every call:
+  `{:name sym, :error-view f}`, its qualified name and its own error view, if
+  it has one."
+  [^Call call]
+  (.-island call))
+
+
 (defn- key-string
   "The key `k` as it appears in a slot (`Slot/key`)."
   [k]
@@ -101,32 +109,37 @@
 
 (defn ^:no-doc island-fn
   "The function `defisland` defines: it returns a `Call` for the island named
-  `island-name` with `render` and the given arguments. The name is a letter
-  followed by letters, digits, `-` and `_`, so that it can't run into the `.`
-  and `/` of ids."
-  [island-name {:keys [key]} render]
-  (when-not (re-matches #"[A-Za-z][A-Za-z0-9_-]*" island-name)
-    (throw (IllegalArgumentException.
-             (str "Island name " (pr-str island-name) ": use a letter followed by letters, digits, - and _."))))
-  ;; Called once per island placed, per render of its parent: a list places a
-  ;; call per row. Fixed arities spare the common case the rest args and `apply`.
-  (if key
-    (let [prefix (str island-name ".")
-          slot   #(String/.concat prefix (key-string %))]
+  `island-name`, a symbol (qualified, from `defisland`) or a string, with
+  `render` and the given arguments. The name is a letter followed by letters,
+  digits, `-` and `_`, so that it can't run into the `.` and `/` of ids."
+  [island-name {:keys [key error-view]} render]
+  (let [slot-name (name island-name)
+        island    {:name (symbol island-name) :error-view error-view}]
+    (when-not (re-matches #"[A-Za-z][A-Za-z0-9_-]*" slot-name)
+      (throw (IllegalArgumentException.
+               (str "Island name " (pr-str slot-name) ": use a letter followed by letters, digits, - and _."))))
+    (when-not (or (nil? error-view) (ifn? error-view))
+      (throw (IllegalArgumentException.
+               (str "Island " slot-name ": :error-view is a fn of the failure, not " (pr-str error-view) "."))))
+    ;; Called once per island placed, per render of its parent: a list places a
+    ;; call per row. Fixed arities spare the common case the rest args and `apply`.
+    (if key
+      (let [prefix (str slot-name ".")
+            slot   #(String/.concat prefix (key-string %))]
+        (fn
+          ([] (Call. (slot (key)) render [] island))
+          ([a] (Call. (slot (key a)) render [a] island))
+          ([a b] (Call. (slot (key a b)) render [a b] island))
+          ([a b c] (Call. (slot (key a b c)) render [a b c] island))
+          ([a b c & more]
+           (let [args (into [a b c] more)]
+             (Call. (slot (apply key args)) render args island)))))
       (fn
-        ([] (Call. (slot (key)) render []))
-        ([a] (Call. (slot (key a)) render [a]))
-        ([a b] (Call. (slot (key a b)) render [a b]))
-        ([a b c] (Call. (slot (key a b c)) render [a b c]))
-        ([a b c & more]
-         (let [args (into [a b c] more)]
-           (Call. (slot (apply key args)) render args)))))
-    (fn
-      ([] (Call. island-name render []))
-      ([a] (Call. island-name render [a]))
-      ([a b] (Call. island-name render [a b]))
-      ([a b c] (Call. island-name render [a b c]))
-      ([a b c & more] (Call. island-name render (into [a b c] more))))))
+        ([] (Call. slot-name render [] island))
+        ([a] (Call. slot-name render [a] island))
+        ([a b] (Call. slot-name render [a b] island))
+        ([a b c] (Call. slot-name render [a b c] island))
+        ([a b c & more] (Call. slot-name render (into [a b c] more) island))))))
 
 
 (defmacro defisland
@@ -141,7 +154,10 @@
   map, and the slot becomes `name.<key>`:
 
       (defisland message {:key :n} [msg]
-        [:li (:text msg)])"
+        [:li (:text msg)])
+
+  The options map's `:error-view`, `(fn [failure] hiccup)`, renders in place of
+  this island when its render throws, instead of the app's (see `error-view`)."
   [island-name & decl]
   (let [[doc decl] (if (string? (first decl)) [(first decl) (next decl)] [nil decl])
         [opts decl] (if (map? (first decl)) [(first decl) (next decl)] [nil decl])
@@ -149,7 +165,7 @@
         island-name (cond-> (vary-meta island-name assoc :arglists (list 'quote (list params)))
                       doc (vary-meta assoc :doc doc))]
     `(def ~island-name
-       (island-fn ~(str island-name) ~opts (fn ~island-name ~params ~@body)))))
+       (island-fn '~(symbol (str *ns*) (str island-name)) ~opts (fn ~island-name ~params ~@body)))))
 
 
 ;; Hooks ------------------------------------------------------------------------
@@ -381,13 +397,28 @@
 
 
 (defn error-view
-  "What renders in place of island `id` when its render throws `e`, unless the
-  app gives an `:error-view` of its own. It says only that the island failed:
-  an exception's message can carry what the user shouldn't see, and the
-  exception is logged."
-  [_id _e]
+  "What renders in place of an island whose render throws, unless the island or
+  the app gives an `:error-view` of its own. It says only that the island
+  failed, with the failure's reference: an exception's message can carry what
+  the user shouldn't see, and the exception is logged with the reference.
+
+  An error view is a fn of the failure, a map:
+
+  - `:ref`        a reference made for this failure, such as `4KF7-Q2XM`, also
+                  in the line logging it: something for the user to report.
+  - `:error`      the exception.
+  - `:island`     the island's qualified name, as `app.page/rating-card`.
+  - `:path`       the island's id, the path of slots from the root.
+  - `:element-id` its element's id in the page (`element-id`).
+  - `:args`       the island's arguments.
+  - `:session`    the session's `{:tab :uid :request}`, as `use-session`.
+
+  What it returns renders in the island's place, and reaches the client. One
+  that throws gives way to the next: an island's to the app's, and the app's to
+  this one."
+  [{:keys [ref]}]
   [:div {:class [:rounded :border :border-red-400 :p-3 :text-sm :text-red-600]}
-   "This part of the page failed to render."])
+   "This part of the page failed to render. Reference " ref "."])
 
 
 (defn ^:no-doc write-frame!

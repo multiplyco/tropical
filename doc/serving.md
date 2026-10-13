@@ -19,7 +19,7 @@ them looks.
                            (ring/mount :body {:class [:min-h-screen]})]])))
    ;; Your authentication: the user a request is made on behalf of, or nil.
    :uid            current-user
-   :error-view     (fn [id e] [:div.error "This part of the page failed to load."])
+   :error-view     (fn [{:keys [ref]}] [:div.error "This part of the page failed to load. Reference " ref "."])
    :first-frame-ms 150
    :compression    [:zstd :br :gzip]})
 
@@ -45,7 +45,7 @@ The keys, with the details in the docstrings of `co.multiply.tropical.ring` and 
 | `:page`              | `(fn [{:keys [tab frame scripts request]}] html)`: the page, from the session's first frame   |
 | `:open-when-hidden`  | true keeps each tab's stream open while its page is hidden, for browser automation; optional  |
 | `:uid`               | `(fn [request] uid)`: the user, or nil                                                         |
-| `:error-view`        | `(fn [id e] hiccup)`: what renders in place of an island that throws; optional                 |
+| `:error-view`        | `(fn [failure] hiccup)`: what renders in place of an island that throws; optional              |
 | `:first-frame-ms`    | how long a session's first frame may wait for reads still pending; 0 by default               |
 | `:compression`       | the encodings to compress the stream with, in order of preference; none by default             |
 | `:max-signals-bytes` | the largest action body read; 1 MiB by default                                                 |
@@ -156,10 +156,32 @@ An app of many pages shares one map, and gives each route its own root:
 
 ## Failures
 
-An island whose render throws renders the app's `:error-view`, `(fn [id e] hiccup)`, in its place. The default says
-only that the island failed: what it renders reaches the client, and an exception's message can carry what the user
-shouldn't see. Failures and lifecycle events are logged through `clojure.tools.logging`, with the exception. A
-failure in a session's own loop, outside the islands' renders, closes the session and its stream, so the client
+An island whose render throws renders an error view in its place, and the rest of the page goes on. The failure is
+logged through `clojure.tools.logging`, with the exception and a reference made for it, such as `4KF7-Q2XM`. The
+default view says only that the island failed, with the reference, for the user to report: what it renders reaches the
+client, and an exception's message can carry what the user shouldn't see.
+
+The app's `:error-view`, `(fn [failure] hiccup)`, replaces the default, and an island's own, in `defisland`'s options,
+replaces the app's for that island:
+
+```clojure
+(defisland chart
+  {:error-view (fn [{:keys [ref]}] [:p "The chart couldn't be drawn. Reference " ref "."])}
+  [series]
+  ...)
+```
+
+- **The failure is a map:** the reference, `:ref`; the exception, `:error`; the island's qualified name, `:island`;
+  its id, `:path`, and its element's, `:element-id`; its `:args`; and the session's `{:tab :uid :request}`,
+  `:session`. A view that reports the failure elsewhere, such as to an error tracker, sends the reference along. The
+  library logs every failure whichever view renders it.
+- **A view that throws gives way:** an island's to the app's, and the app's to the default.
+- **What a render throws is the island's,** an `AssertionError` from `assert` or a `:pre` included, except what leaves
+  the JVM in no state to go on, such as running out of memory, which closes the session.
+- **A failed island is an island.** Its children unmount, and it renders again, as any island does, when its
+  arguments change or something it read before it threw does.
+
+A failure in a session's own loop, outside the islands' renders, closes the session and its stream, so the client
 reconnects into a new one.
 
 ## Names in the page

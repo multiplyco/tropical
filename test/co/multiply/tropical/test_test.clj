@@ -144,18 +144,25 @@
   (throw (ex-info "broken" {})))
 
 
+(defisland faulty-own
+  {:error-view (fn [_] [:p "its own view"])}
+  []
+  (throw (ex-info "broken too" {})))
+
+
 (defisland holder
   []
-  [:div (faulty) (user-badge)])
+  [:div (faulty) (faulty-own) (user-badge)])
 
 
 (deftest failures-are-listed
-  (with-open [h (test/harness holder {:error-view (fn [_ e] [:p "view: " (ex-message e)])})]
+  (with-open [h (test/harness holder {:error-view (fn [{:keys [error]}] [:p "view: " (ex-message error)])})]
     (let [html (test/render! h)]
       (is (str/includes? html "view: broken") "the error view renders in its place")
+      (is (str/includes? html "its own view") "an island's own, in its")
       (is (str/includes? html "user=") "the rest renders"))
-    (is (= ["holder/faulty"] (map :island (test/failures h))))
-    (is (= "broken" (ex-message (:error (first (test/failures h))))))))
+    (is (= ["holder/faulty" "holder/faulty-own"] (map :path (test/failures h))) "whichever view rendered")
+    (is (= ["broken" "broken too"] (map (comp ex-message :error) (test/failures h))))))
 
 
 (deftest closing-unmounts

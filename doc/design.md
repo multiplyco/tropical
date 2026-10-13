@@ -511,6 +511,20 @@ reading it, learns the app's layout from it.
   message can carry what the user shouldn't see: a query, an id, another service's error. So the default says only
   that a part of the page failed, without naming the island, and an app that wants more, in development, gives its
   own `:error-view`.
+- **A reference per failure.** Each failure gets 40 random bits, as `4KF7-Q2XM`, in the line logging it and in the
+  failure its view gets, and the default view shows them. A user reports what they saw, and the log has the exception
+  under the same reference, while the page carries nothing about it. Random, not a digest of the exception: the same
+  failure twice is two reports, each with its own time and session. The library logs every failure, whichever view
+  renders it, so a view that forgets to log loses nothing, and one that reports elsewhere sends the reference along.
+- **An island's own view, not a boundary.** An island can replace the app's view for itself, as for a chart whose
+  failure has something particular to say. It covers that island only. A child's failure never reaches its parent,
+  since each renders on its own, so nothing is there for a subtree to catch, as React's error boundaries do. A view
+  inherited through the subtree would be a feature of its own, which no app has asked for.
+- **What a render throws is the island's.** Not only an `Exception`: `assert` and a `:pre` throw an `AssertionError`.
+  One that escaped the island would close the session, and the fresh session its tab reconnects into would render the
+  same island and close too, until Datastar stopped retrying. A stack overflow has unwound by the time it is caught.
+  What leaves the JVM in no state to go on, a `VirtualMachineError` such as running out of memory, goes past, to the
+  session.
 - **`clojure.tools.logging`, not a backend.** A library shouldn't pick where logs go. tools.logging is the facade most
   Clojure apps already route, to SLF4J, Telemere or others, and exceptions go with their stack traces. A hook in the
   app map was the alternative: it fits a session's events, but not the resource registry's, which belong to no app.

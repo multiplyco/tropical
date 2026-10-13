@@ -26,9 +26,10 @@ reaches the sessions that read it, and how a session keeps its tab. How resource
   no wrapper element around each, and put what changes with the list, such as a count, in another island.
 - **Unmounting.** When an island renders without a child it placed before, that child and everything under it unmount:
   their holds are released, their subscriptions cancelled and their action tokens revoked.
-- **Failures.** A render that throws renders the error view in its place, and the exception is logged. It never fails
-  the session. A failure in the session's own loop, outside the islands' renders, closes the session and its stream,
-  so the client reconnects into a new one.
+- **Failures.** A render that throws renders an error view in its place, the island's own, the app's or the default,
+  and the exception is logged with a reference the default view shows. It doesn't fail the session, unless it leaves
+  the JVM in no state to go on, as running out of memory does. A failure in the session's own loop, outside the
+  islands' renders, closes the session and its stream, so the client reconnects into a new one.
 
 ## Signals (`signal`)
 
