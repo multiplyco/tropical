@@ -16,7 +16,7 @@ its islands, functions returning hiccup, and sends what changed over one SSE str
 by element id. Writes come back as actions: closures rendered into the page as tokens, posted with Datastar's signals.
 
 **Repository**: https://github.com/multiplyco/tropical —
-`co.multiply/tropical {:mvn/version "0.4.1"}`, JDK 25+, Clojure 1.12+, Datastar 1.0.4 in the browser.
+`co.multiply/tropical {:mvn/version "0.5.0"}`, JDK 25+, Clojure 1.12+, Datastar 1.0.4 in the browser.
 
 This file covers what you can't infer: where a reasonable guess from React, Electric, htmx or a Datastar server SDK is
 wrong. It is not an API reference. The app-facing vars and namespaces carry thorough docstrings, so for signatures and
@@ -128,9 +128,17 @@ plain function returning hiccup, called inside islands.
   loop's, cancelled when it closes, whose failure fails the resource; or nil.
 - **`emit!` keeps only the latest value.** A reader may never see values in between, so diffs can't go through it:
   emit the state. It works from any thread, and does nothing once the resource has closed.
-- **Pending, then values, and failures throw.** `observe` returns `hooks/pending` until the first `emit!`. When `f`
-  throws or its task fails, `observe` throws in the render: `try` handles it, and uncaught, the island renders the
-  error view. The next reader opens a new resource.
+- **Pending, then values, and failures throw.** `observe` returns `hooks/pending` until the first `emit!`
+  (`hooks/pending?`). When `f` throws or its task fails, `observe` throws in the render: `try` handles it, and
+  uncaught, the island renders the error view. The next reader opens a new resource.
+- **A read that depends on a read waits for it.** `pending` is a value, not a suspension as in Electric or an
+  `await`: the render goes on with it. `observe` given `pending` itself returns `pending` and opens nothing, but a
+  field of it is nil, so `(observe (:id user) …)` opens with nil, and `(use-shared s (:id user))` reads everyone's
+  instance. Branch on `(hooks/pending? user)` and read the rest inside, rendering what has loaded at each step, or in
+  a child island given `user` once it has: a read of ids renders an island per id, keyed, each reading its own item.
+  Where reads wait together, `(if-loaded [user (observe …) orders (observe (:id user) …)] then else)` evaluates a
+  binding once those it refers to have loaded, and starts the rest in the same render; without an else it returns
+  `pending`. The first frame's wait, and `render!`'s in a test, hide the bug on a cold load, but no later frame waits.
 - **Wrap it with one call site.** An app's own read is a function over `observe`, whose call site is shared by every
   caller, so its resources are keyed by `args` alone. A macro gets a call site per expansion. The same call made twice
   in one render, with equal `args`, returns one value from one resource, so several helpers may ask questions of the

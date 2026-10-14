@@ -1,6 +1,6 @@
 {
   "name": "tropical",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "Server-rendered islands for Datastar with co.multiply.tropical: defisland, use-watch, use-state, observe, use-action, navigate, defcookie, defstorage, defshared, defscript, use-uploads, the ui helpers, ring/handler, and testing islands with co.multiply.tropical.test — what renders when, what is shared, and what the browser is trusted with.",
   "author": {
     "name": "Multiply",

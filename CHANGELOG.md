@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.0 - 2026-10-14
+
+- `observe` given `pending` among its args returns `pending` and opens nothing, so a read given another's value starts
+  once that one has loaded. It opened a resource for `pending`, shared by every reader, and called its fn with it.
+- Add `hooks/if-loaded`, a `let` whose bindings wait for the ones they refer to. A read given a value taken from
+  another, such as `(:id user)`, starts once that one has loaded, where it opened with nil, which after the first
+  frame showed as the error view or as data that isn't. Reads that refer to none start in the same render. Without an
+  else it returns `pending`. The clj-kondo config reads it as `let`.
+- Add `hooks/pending?` and `storage/pending?`.
+
 ## 0.4.1 - 2026-10-13
 
 - The docs say when `:stream-max-ms` keeps stickiness from lapsing: when each request extends the cookie's life. A

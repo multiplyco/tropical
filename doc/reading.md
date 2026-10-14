@@ -10,7 +10,7 @@
                   (fn [emit! topic]
                     (let [sub (subscribe-feed topic emit!)]
                       #(unsubscribe sub))))]
-    (if (= hooks/pending reading)
+    (if (hooks/pending? reading)
       [:p "Connecting…"]
       [:p (:value reading)])))
 ```
@@ -31,11 +31,13 @@
   `(observe (ask *account*) query-account)`.
 - **`emit!` keeps the latest value.** A session renders whatever is current when it gets to it, so values in between
   may never be seen. It may be called from any thread, and does nothing once the resource has closed.
-- **Pending and failure.** `observe` returns `hooks/pending` until the first value; a session's first frame can wait
-  briefly for it (`:first-frame-ms`, in [Serving pages](serving.md)). It throws in the render when `f` throws or its
-  task fails, so `try` handles a failure; uncaught, the island renders the error view. The failed resource is closed,
-  and the next reader opens a new one.
+- **Pending and failure.** `observe` returns `hooks/pending` until the first value, which `hooks/pending?` tells
+  apart; a session's first frame can wait briefly for it (`:first-frame-ms`, in [Serving pages](serving.md)). It
+  throws in the render when `f` throws or its task fails, so `try` handles a failure; uncaught, the island renders the
+  error view. The failed resource is closed, and the next reader opens a new one.
 - **Other `args`** release the old resource, which lingers, and hold the new one.
+- **Given `pending`, pending.** If one of `args` is `pending`, `observe` returns `pending` and opens nothing, so a read
+  given another's value starts once that one has loaded.
 
 Reads of a shape of their own build on it: a function, whose one call site every caller shares, so its resources are
 keyed by its `args` alone, or a macro, which makes a call site at each use:
@@ -60,6 +62,72 @@ keyed by its `args` alone, or a macro, which makes a call site at each use:
 
 A query read like this is shared and cached as a subscription is: identical queries run once, and a reader arriving
 while the result is held sees it at once.
+
+## Reads that depend on reads
+
+A read's value is `pending` until it has loaded. `observe` given `pending` returns `pending` and opens nothing, but a
+value taken from a pending read, such as `(:id user)`, is nil, and a read given it opens with nil. Branching on
+`pending?` avoids that, and renders what has loaded at each step. A read inside a branch is fine, since hooks are keyed
+by name, not by call order:
+
+```clojure
+(let [user (observe uid load-user)]
+  (if (hooks/pending? user)
+    [:p "Loading…"]
+    [:div
+     [:h2 (:name user)]
+     (let [orders (observe (:id user) load-orders)]
+       (if (hooks/pending? orders)
+         [:p "Loading orders…"]
+         [:ul (for [o orders] [:li (:title o)])]))]))
+```
+
+The inner part could just as well be an island of its own, given `user` once it has loaded. That is the usual shape
+where a read gives a collection: an island per item, keyed by it, each reading its own.
+
+```clojure
+(defisland item-row {:key identity}
+  [item-id]
+  (let [item (observe item-id load-item)]
+    (if (hooks/pending? item)
+      [:li "Loading…"]
+      [:li (:title item)])))
+
+
+(defisland item-list
+  [list-id]
+  (let [item-ids (observe list-id load-item-ids)]
+    (if (hooks/pending? item-ids)
+      [:p "Loading…"]
+      [:ul (for [item-id item-ids] (item-row item-id))])))
+```
+
+Each item's read is a resource of its own, shared by every session showing the item, and each row shows as it loads,
+sent alone. A session's first frame waits for the rows' reads too, within its budget: they are reads of islands that
+appear once the list's read lands. The check isn't optional here, since `for` over `pending` throws, and the list would
+show its error view until its ids load.
+
+Where reads wait together, with nothing to show until all have loaded, `if-loaded` is shorter. It binds as `let` does,
+but evaluates a binding only once the bindings it refers to have loaded:
+
+```clojure
+(if-loaded [user   (observe uid load-user)
+            orders (observe (:id user) load-orders)
+            prefs  (observe uid load-prefs)]
+  [:section {:class (:theme prefs)}
+   [:ul (for [o orders] [:li (:title o)])]]
+  [:p "Loading…"])
+```
+
+`orders` waits for `user`. `prefs` refers to neither, so it starts in the same render as `user`: reads that don't
+depend on each other still load side by side. References are found by name, in the expression as written, so a name
+bound again inside it still counts, which errs toward waiting. Without an else, `if-loaded` returns `pending`, which
+can feed another read, or another `if-loaded`.
+
+A session's first frame waits for its reads, so a read opened with nil may never show on a cold page load, but no
+later frame waits: when `user`'s `args` change, or the island first appears after an action, the read opened with nil
+shows, as the error view or as data that isn't. A shared state's key taken from a read is the same:
+`(use-shared drafts (:id user))`, with `user` pending, reads the instance for nil, which is everyone's.
 
 ## A resource's life
 

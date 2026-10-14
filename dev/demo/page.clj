@@ -119,7 +119,7 @@
   "A feed's latest `reading` with its `label`, or that it's connecting while
   `reading` is pending."
   [reading label]
-  (if (= hooks/pending reading)
+  (if (hooks/pending? reading)
     [:div {:class (conj muted :h-16 :animate-pulse)} "Connecting…"]
     [:div {:class [:h-16]}
      [:div {:class [:font-mono :text-4xl :tabular-nums]} reading]
@@ -202,14 +202,14 @@
   "A hook: `topic`'s latest reading, or pending."
   [topic]
   (let [v (feed-of topic)]
-    (if (= hooks/pending v) v (:reading v))))
+    (if (hooks/pending? v) v (:reading v))))
 
 
 (defn- use-reading-label
   "A hook: which of `topic`'s readings is the latest, and when it came."
   [topic]
   (let [v (feed-of topic)]
-    (when-not (= hooks/pending v) (reading-label v))))
+    (when-not (hooks/pending? v) (reading-label v))))
 
 
 (defisland ticker
@@ -228,7 +228,7 @@
   [topic]
   (let [info (observe topic state/describe-topic)]
     [:p {:class muted}
-     (if (= hooks/pending info)
+     (if (hooks/pending? info)
        "Looking up the topic…"
        (str (:about info) ": a reading every " (:period-ms info) " ms. Looked up at " (:looked-up-at info) "."))]))
 
@@ -270,7 +270,7 @@
 (defisland vault-feed
   []
   (let [v (observe state/vault)]
-    (reading-view (cond-> v (not= hooks/pending v) :reading) (reading-label v))))
+    (reading-view (cond-> v (not (hooks/pending? v)) :reading) (reading-label v))))
 
 
 (defscript time-ago
@@ -647,7 +647,7 @@
      [:span {:class [:flex-1 :font-medium]} title]
      [:span {:class muted}
       (cond
-        (= storage/pending v) "…"
+        (storage/pending? v) "…"
         (= v (proposal-default proposal)) "Not reworked yet"
         :else (str "A draft of " (words v) " words"))]
      [:button {:class button :data-on:click rework} "Rework"]

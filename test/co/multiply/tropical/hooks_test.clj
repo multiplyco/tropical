@@ -3,11 +3,11 @@
     [clojure.test :refer [deftest is testing]]
     [co.multiply.quiescent :as q]
     [co.multiply.scoped :refer [ask scoping]]
-    [co.multiply.tropical.hooks :refer [observe]]
+    [co.multiply.tropical.hooks :refer [if-loaded observe pending pending?]]
     [co.multiply.tropical.island :as island :refer [use-watch]]
     [co.multiply.tropical.resource :as resource]
     [co.multiply.tropical.runtime :as runtime]
-    [co.multiply.tropical.test-util :refer [harness]])
+    [co.multiply.tropical.test-util :refer [harness manual-source observe-source]])
   (:import
     [clojure.lang Compiler$CompilerException]))
 
@@ -106,6 +106,88 @@
         (step)
         (Thread/sleep 300)
         (is (empty? (select-keys (held) [[4] [5]]))))
+      (runtime/dispose! rt))))
+
+
+(deftest a-read-given-pending-is-pending-and-opens-nothing
+  (reset! !opened [])
+  (with-redefs [resource/linger-ms 100]
+    (let [[k1 s1 emit!] (manual-source)
+          [k2 s2] (manual-source)
+          !source (atom [k1 s1])
+          island  (island/island-fn "chained" nil
+                    (fn []
+                      (let [[k s] (use-watch !source)
+                            v     (read-ten (observe-source k s))]
+                        [:p (if (pending? v) "pending" (str v))])))
+          {:keys [step rt]} (harness island)]
+      (is (re-find #">pending<" (island/html (step))))
+      (Thread/sleep 100)
+      (is (= [] @!opened) "nothing opened with pending")
+      (is (nil? (get (held) [pending])))
+      (testing "it opens once what it's given has loaded"
+        (emit! 3)
+        (step)
+        (Thread/sleep 100)
+        (is (re-find #">30<" (island/html (step))))
+        (is (= [3] @!opened)))
+      (testing "and is released when that is pending again"
+        (reset! !source [k2 s2])
+        (is (re-find #">pending<" (island/html (step))))
+        (is (zero? (:subscribers (get (held) [3]))))
+        (Thread/sleep 300)
+        (is (nil? (get (held) [3]))))
+      (runtime/dispose! rt))))
+
+
+(deftest if-loaded-waits-only-on-what-a-binding-refers-to
+  (let [!evaluated (atom [])
+        note       (fn [k v] (swap! !evaluated conj k) v)]
+    (is (= [1 2] (if-loaded [a 1 b (inc a)] [a b] :else)))
+    (testing "a binding referring to a pending one isn't evaluated, and one referring to none is"
+      (is (= :else (if-loaded [a pending
+                               b (note :b (inc a))
+                               c (note :c 3)
+                               d (note :d (+ b c))]
+                     [a b c d]
+                     :else)))
+      (is (= [:c] @!evaluated)))
+    (testing "a name bound again is the later binding's"
+      (reset! !evaluated [])
+      (is (= :else (if-loaded [a pending b (note :b a) a 2 c (note :c (inc a))] [b c] :else)))
+      (is (= [:c] @!evaluated)))
+    (testing "a pattern destructures only a loaded value"
+      (is (= :else (if-loaded [{:keys [id]} pending] id :else)))
+      (is (= :else (if-loaded [[x] pending] x :else))))
+    (testing "nil has loaded"
+      (is (= [nil] (if-loaded [a nil] [a] :else))))
+    (testing "without else, pending"
+      (is (pending? (if-loaded [a pending] a))))
+    (testing "else sees none of the bindings"
+      (is (thrown? Compiler$CompilerException
+            (eval '(co.multiply.tropical.hooks/if-loaded [a 1] a a)))))))
+
+
+(deftest if-loaded-starts-a-dependent-read-once-its-input-has-loaded
+  (reset! !opened [])
+  (with-redefs [resource/linger-ms 100]
+    (let [[k s emit!] (manual-source)
+          island (island/island-fn "loaded" nil
+                   (fn []
+                     (if-loaded [{:keys [x]} (observe-source k s)
+                                 y          (read-ten (inc x))
+                                 z          (read-ten 7)]
+                       [:p (str y " " z)]
+                       [:p "loading"])))
+          {:keys [step rt]} (harness island)]
+      (is (re-find #">loading<" (island/html (step))))
+      (Thread/sleep 100)
+      (is (= [7] @!opened) "the read that refers to none starts, and none opens with a value taken from pending")
+      (emit! {:x 1})
+      (step)
+      (Thread/sleep 100)
+      (is (re-find #">20 70<" (island/html (step))))
+      (is (= [7 2] @!opened))
       (runtime/dispose! rt))))
 
 

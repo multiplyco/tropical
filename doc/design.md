@@ -124,6 +124,21 @@ and coalescing come from the runtime and the session pump instead, and are cover
   run once, and the result lives as long as its readers, plus the linger.
 - **The linger.** Without it, every remount (a topic switched back, access granted again, a reconnect) would close and
   reopen a resource, and the churn would land on the database.
+- **Pending is a value, and a read given it waits.** A render reads `pending` and goes on, so the reads after it start
+  in the same render, and an island shows what has loaded beside what hasn't. The cost is that `pending` flows on: a
+  read given it, or a field of it, which is nil, opened a resource for that, shared by every reader, and after the
+  first frame, which waits, showed it as the error view or as data that isn't. So `observe` given `pending` returns it
+  and opens nothing. A render that branches on `pending?` needs nothing more, and shows what has loaded at each step.
+  For reads that wait together, `if-loaded` evaluates a binding only once the bindings it refers to have loaded, found
+  by name, as Quiescent's `qlet` finds them, so reads that don't depend on each other still start together. It looks
+  at values, not at calls to `observe`, so it works through an app's functions over `observe`, and over any value. The
+  alternatives:
+  - Suspending at a pending read, as an `await` or React's Suspense does, gets a dependent read right by construction,
+    but starts the reads after it only once it lands: a waterfall within the island, and nothing to show beside it.
+  - A `pending` whose lookups return itself carries through `(:id user)` but not through `str` or `+`, and nothing in
+    the code shows where it stops.
+  - Rewriting the render into a graph of its reads, as Electric compiles a program, has to see every read, and an
+    app's reads are functions over `observe`, which a macro can't see into.
 
 ## Signals
 

@@ -87,6 +87,12 @@
   resource/pending)
 
 
+(defn pending?
+  "Whether `x` is `pending`: `observe`'s value until the browser has sent it."
+  [x]
+  (identical? pending x))
+
+
 ;; Declaring --------------------------------------------------------------------
 
 
@@ -291,7 +297,7 @@
 
       (let [draft (use-storage edits id {:default {\"text\" text}})
             v     (observe draft)]
-        [:p (if (= pending v) \"…\" (str (word-count (get v \"text\")) \" words\"))])
+        [:p (if (pending? v) \"…\" (str (word-count (get v \"text\")) \" words\"))])
 
   The browser sends it once the page has the island, so the first frame
   never has it, and doesn't wait for it, then each change, a moment after the

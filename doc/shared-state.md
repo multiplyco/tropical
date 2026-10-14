@@ -32,4 +32,6 @@ navigation opens still has; who has a document open. An island's own state ends 
 - **In memory.** A restart loses it, and each server behind a balancer holds its own: for what must last or reach a
   user wherever they are connected, use a database or a stream, read with `observe`.
 - **The key is the access.** Build it from what the session vouches for, such as `use-session`'s `:uid`, never from
-  signals or an action's value.
+  signals or an action's value. A key taken from a read goes in `if-loaded`
+  ([Reading](reading.md#reads-that-depend-on-reads)): while the read is pending, `(:id user)` is nil, and nil is
+  everyone's.

@@ -4,9 +4,11 @@
 ;; `defisland` reads as `defn`: a name, an optional docstring, an optional map
 ;; (`defisland`'s options, `defn`'s attr map), then params and body. `defcookie`,
 ;; `defstorage`, `defscript` and `defshared` read as `def`: a name, an optional
-;; docstring, then its options.
+;; docstring, then its options. `if-loaded` reads as `let`: bindings, then its
+;; branches.
 {:lint-as {co.multiply.tropical.island/defisland   clojure.core/defn
            co.multiply.tropical.cookie/defcookie   clojure.core/def
            co.multiply.tropical.storage/defstorage clojure.core/def
            co.multiply.tropical.script/defscript   clojure.core/def
-           co.multiply.tropical.shared/defshared   clojure.core/def}}
+           co.multiply.tropical.shared/defshared   clojure.core/def
+           co.multiply.tropical.hooks/if-loaded    clojure.core/let}}

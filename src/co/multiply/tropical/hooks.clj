@@ -5,7 +5,9 @@
   It returns `pending` until the first value arrives, and throws in the render
   when what it reads fails: the island renders the error view unless it catches
   it. A read is a hold keyed by what it reads, so hooks of an app's own that
-  read the same thing in one render share it: one resource, one value."
+  read the same thing in one render share it: one resource, one value.
+
+  A read that depends on another waits for it with `if-loaded`."
   (:require
     [clojure.string :as str]
     [co.multiply.tropical.island :as island]
@@ -17,22 +19,31 @@
   resource/pending)
 
 
+(defn pending?
+  "Whether `x` is `pending`: a read's value until it has loaded."
+  [x]
+  (identical? pending x))
+
+
 (defn observe*
   "What `observe` expands to: the resource keyed by `site`, the call site, and
-  `args`, opened by calling `f` with `emit!` and `args`."
+  `args`, opened by calling `f` with `emit!` and `args`. `pending`, holding
+  nothing, if one of `args` is."
   {:no-doc true}
   [site args f]
-  (let [key [site args]
-        v   (island/use-watch
-              (island/use-hold [::observe key]
-                (fn []
-                  (let [!value (resource/acquire! key #(apply f % args))]
-                    {:value   !value
-                     :release #(resource/release! key !value)}))
-                {:idempotent true}))]
-    (if (resource/failed? v)
-      (throw (:error v))
-      v)))
+  (if (some pending? args)
+    pending
+    (let [key [site args]
+          v   (island/use-watch
+                (island/use-hold [::observe key]
+                  (fn []
+                    (let [!value (resource/acquire! key #(apply f % args))]
+                      {:value   !value
+                       :release #(resource/release! key !value)}))
+                  {:idempotent true}))]
+      (if (resource/failed? v)
+        (throw (:error v))
+        v))))
 
 
 ;; The check that `f` takes everything it depends on through `args`.
@@ -44,7 +55,8 @@
 
 
 (defn- bound-names
-  "The names that a fn's param vector binds, destructuring included."
+  "The names that a fn's param vector, or a binding's pattern, binds,
+  destructuring included."
   [params]
   (into #{} (comp (partition-all 2) (map first)) (destructure [params (gensym)])))
 
@@ -106,6 +118,11 @@
   Given other `args`, the island holds the new resource and releases the old
   one, which lingers before it closes (`resource/linger-ms`).
 
+  If one of `args` is `pending`, as another read's value is until it loads, it
+  returns `pending` and opens nothing, so a read that depends on another starts
+  once that one has loaded. A value taken from a pending one, such as
+  `(:id user)`, is nil, not `pending`: wait for it with `if-loaded`.
+
   The same call made again in one render, with equal `args`, returns the same
   value, from the one resource. So a hook of the app's own wrapping `observe`,
   whose every read shares its call site, may be called by several hooks in
@@ -127,3 +144,61 @@
                         "(observe " (first locals) " (fn [emit! " (first locals) "] ...)).")
                {:locals (vec locals)})))
     `(observe* '~site ~args ~f)))
+
+
+;; `if-loaded`: which bindings wait for which.
+
+
+(defn- loaded-bindings
+  "`if-loaded`'s binding pairs as a `let`'s bindings, each value bound first to
+  a name of its own, its raw value: `pending`, without evaluating it, where its
+  expression refers to a binding whose raw value is. Its pattern is bound to
+  it only once it has loaded, so destructuring never sees `pending`. Returns
+  `[bindings raws]`."
+  [pairs]
+  (loop [[[pattern expr :as pair] & more] pairs
+         binders  {}
+         bindings []
+         raws     []]
+    (if-not pair
+      [bindings raws]
+      (let [raw   (gensym "raw")
+            waits (into [] (comp (keep binders) (distinct)) (symbols expr))]
+        (recur more
+          ;; A name bound again is the later binding's.
+          (into binders (map (fn [n] [n raw])) (bound-names pattern))
+          (conj bindings
+            raw (if (seq waits)
+                  `(if (or ~@(map (fn [w] `(pending? ~w)) waits)) pending ~expr)
+                  expr)
+            pattern `(when-not (pending? ~raw) ~raw))
+          (conj raws raw))))))
+
+
+(defmacro if-loaded
+  "`then`, with `bindings` bound as a `let`'s, once every value they bind has
+  loaded; else `else`, or `pending` without one.
+
+      (if-loaded [user   (observe uid load-user)
+                  orders (observe (:id user) load-orders)]
+        [:ul (for [o orders] [:li (:title o)])]
+        [:p \"Loading…\"])
+
+  A value has loaded once it isn't `pending`. A binding whose expression refers
+  to one that hasn't isn't evaluated, and hasn't loaded either: a read that
+  depends on another starts once that one has loaded, never with `pending`, or
+  a value taken from it, among its args. One that refers to none is evaluated,
+  so reads that don't depend on each other start in the same render.
+
+  References are found by name, in the expression as written, so a name bound
+  again inside it still counts, which errs toward waiting. `else` sees none of
+  the bindings."
+  ([bindings then]
+   `(if-loaded ~bindings ~then pending))
+  ([bindings then else]
+   (when-not (and (vector? bindings) (even? (count bindings)))
+     (throw (IllegalArgumentException. "if-loaded takes a vector of bindings, in pairs.")))
+   (let [[bindings raws] (loaded-bindings (partition 2 bindings))]
+     `(let [result# (let [~@bindings]
+                      (if (or ~@(map (fn [r] `(pending? ~r)) raws)) ::unloaded ~then))]
+        (if (identical? ::unloaded result#) ~else result#)))))

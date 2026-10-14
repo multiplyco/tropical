@@ -5,7 +5,7 @@
 
 
 (def lib 'co.multiply/tropical)
-(def version "0.4.1")
+(def version "0.5.0")
 (def class-dir "target/classes")
 (def jar-file (format "target/%s-%s.jar" (name lib) version))
 (def basis (delay (b/create-basis {:project "deps.edn"})))
