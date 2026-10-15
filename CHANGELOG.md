@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.7.0 - 2026-10-15
 
 - A `use-watch` whose selector throws keeps its subscription, retries when the source changes, and releases the
   subscription when the island unmounts. Failed selections could leave watches behind and never recover.
