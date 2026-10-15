@@ -64,6 +64,13 @@
                                  (println "Failed:" (str/join ", " failed))
                                  (System/exit 1)))}
 
+  bench           {:doc     "Profile in a fresh JVM: measure [workload], record workload [seconds], summarize recording.jfr"
+                   :depends [compile:java]
+                   :task    (apply shell "clj" "-J-Xms512m" "-J-Xmx512m"
+                              "-J-XX:FlightRecorderOptions=stackdepth=128"
+                              "-M" "-i" "dev/bench/profile.clj" "-m" "bench.profile"
+                              (or (seq *command-line-args*) ["measure"]))}
+
   build           {:doc  "Build library JAR"
                    :task (shell "clj -T:build jar")}
 

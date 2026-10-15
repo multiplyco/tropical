@@ -58,6 +58,9 @@ skill is available, load it for those.
 - **Calling an island places it; it doesn't render it.** It returns a `Call`, as a React element. The runtime renders
   an island when it is new, when its arguments changed (`=`), or when something it read changed, and otherwise reuses
   its last output, and everything below it, without visiting them.
+- **An island can place itself recursively.** A self-call inside `defisland` places a child island, with its own
+  state, reads and holds. Give sibling nodes distinct keys, as in a tree view. A plain recursive helper stays within
+  the calling island and shares its hook scope.
 - **Arguments are compared with `=`.** A fresh fn or a collection built differently each render makes the child render
   every time. Pass data and stable references (vars, def'd fns, atoms created once).
 - **An island's id is the path of slots from the root.** Its slot is its name, plus `.key` with a `:key` fn:

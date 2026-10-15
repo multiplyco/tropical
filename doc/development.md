@@ -11,6 +11,7 @@ bb test           # compile the Java, run the JVM and browser-state tests (Node.
 bb test:browser   # test the embedded cookie/storage JavaScript, with Node.js
 bb test:linux     # the tests in Linux, under JDK 25 in Docker: amd64, arm64, amd64-musl, arm64-musl, or all
 bb lint           # clj-kondo, under the config the jar exports
+bb bench          # compile the Java, then measure isolated workloads in a fresh JVM
 bb compile:java   # after changing a .java file
 bb native:zstd    # rebuild the libzstd the jar ships, from zstd's release source
 bb native:brotli  # rebuild the libbrotlienc the jar ships, from brotli's release source
@@ -18,19 +19,19 @@ bb native:brotli  # rebuild the libbrotlienc the jar ships, from brotli's releas
 
 The Java sources sit next to the Clojure ones in `src`, and compile into `target/classes`.
 
-`bench.profile` measures isolated island updates and records CPU and allocation samples with JFR. Run it in a fresh
-JVM after `bb compile:java`; loading the file directly avoids starting `dev/user.clj` and its REPL server:
+`bb bench` runs `bench.profile` in a fresh JVM with a fixed 512 MiB heap, compiling the Java first. It loads the
+benchmark directly, so `dev/user.clj` and its REPL server aren't started:
 
 ```sh
-clj -J-Xms512m -J-Xmx512m -M -i dev/bench/profile.clj -e '(bench.profile/-main "measure")'
-clj -J-Xms512m -J-Xmx512m -J-XX:FlightRecorderOptions=stackdepth=128 -M \
-  -i dev/bench/profile.clj -e '(bench.profile/-main "record" "sparse-1000")'
-clj -M -i dev/bench/profile.clj -e '(bench.profile/-main "summarize" "target/perf/sparse-1000.jfr")'
+bb bench measure
+bb bench record sparse-1000
+bb bench summarize target/perf/sparse-1000.jfr
 ```
 
-Pass a workload name after `"measure"` to run just that case. `bench.profile/workloads` lists the sparse, broad,
-filtered, deep-tree, many-read and list-change cases. Results and recordings go under `target/perf`, outside Git. Timing runs
-have JFR off; the recordings sample a warmed workload for ten seconds. The summary selects the main thread, as
+Without arguments, `bb bench` runs `measure`. Pass a workload name after `measure` to run just that case, or seconds
+after the workload in `record` to change its duration. `bench.profile/workloads` lists the sparse, broad, filtered,
+deep-tree, many-read and list-change cases. Results and recordings go under `target/perf`, outside Git. Timing runs
+have JFR off; recordings sample a warmed workload for ten seconds by default. The summary selects the main thread, as
 used by these commands. These measure publishing through patch writing to a null stream, excluding the pump's
 pacing, HTTP, compression and browser work. The older `bench.signal`, `bench.frame` and `bench.sse` benchmarks run
 from the development REPL; the frame benchmark changes the demo's alpha feed, so run it without other demo users.

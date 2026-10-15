@@ -8,9 +8,11 @@
 - Closing a session after a render fails past its error views, as running out of memory does, releases the holds
   its islands currently own, without leaking new holds or releasing already-dropped holds a second time.
 - Island updates do less work for unchanged siblings and allocate fewer temporary collections. Adding or removing
-  list items reuses the surviving children's ids and frame map, reducing allocation for large lists.
+  items in a long list also uses less server CPU and allocates less memory.
 - Repeated island renders reuse instance bookkeeping and read records, reducing CPU time and allocation when many
   islands update together.
+- An island can call itself to place keyed child islands, as in a tree view. Self-calls previously rendered inline,
+  sharing the parent's reads, state and holds instead of creating child islands.
 
 ## 0.6.0 - 2026-10-15
 

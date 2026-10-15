@@ -114,16 +114,23 @@
       (defisland message {:key :n} [msg]
         [:li (:text msg)])
 
+  Calling the island by name in its own body places a child island, as for a
+  tree view. Each child has its own state, reads and holds; siblings need keys
+  just as when calling another island.
+
   The options map's `:error-view`, `(fn [failure] hiccup)`, renders in place of
   this island when its render throws, instead of the app's (see `error-view`)."
   [island-name & decl]
   (let [[doc decl] (if (string? (first decl)) [(first decl) (next decl)] [nil decl])
         [opts decl] (if (map? (first decl)) [(first decl) (next decl)] [nil decl])
         [params & body] decl
+        ;; Leave the island var available for self-calls, without capturing an
+        ;; app helper that happens to be named <island>-render either.
+        render-name (gensym (str (name island-name) "-render-"))
         island-name (cond-> (vary-meta island-name assoc :arglists (list 'quote (list params)))
                       doc (vary-meta assoc :doc doc))]
     `(def ~island-name
-       (island-fn '~(symbol (str *ns*) (str island-name)) ~opts (fn ~island-name ~params ~@body)))))
+       (island-fn '~(symbol (str *ns*) (str island-name)) ~opts (fn ~render-name ~params ~@body)))))
 
 
 ;; Hooks ------------------------------------------------------------------------

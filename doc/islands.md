@@ -77,6 +77,25 @@ The same rules as React apply, and the same mistakes are possible:
   time. Pass data.
 - The work is slicing islands at the right size: [When to make an island](#when-to-make-an-island).
 
+## Recursive islands
+
+An island can call itself to place child islands. For a tree stored in `!nodes`, an atom mapping each node id to its
+label and child ids:
+
+```clojure
+(defisland tree-node {:key identity}
+  [id]
+  (let [{:keys [label children]} (use-watch !nodes #(get % id))]
+    [:li [:span label]
+     (when (seq children)
+       [:ul (map tree-node children)])]))
+```
+
+Each call to `tree-node` places a separate island, with its own state, reads, holds and actions. Sibling nodes need
+distinct keys, and their ids are scoped under their parent as usual. Reading each node by id lets a label change
+render only that node; removing a branch releases everything its nodes held. A plain recursive helper function
+still runs within the calling island, so its hooks belong to that island.
+
 ## When to make an island
 
 Not every component is an island. An island is a boundary: the unit that renders again, the unit sent to the browser,

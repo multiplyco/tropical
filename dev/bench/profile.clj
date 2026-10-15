@@ -3,11 +3,11 @@
 
   Run in a fresh JVM (no server is started):
 
-      clj -J-Xms512m -J-Xmx512m -M -i dev/bench/profile.clj
+      bb bench measure
+      bb bench record sparse-1000
+      bb bench summarize target/perf/sparse-1000.jfr
 
-  Then call `(bench.profile/-main \"measure\")` or
-  `(bench.profile/-main \"record\" \"sparse-1000\")`. `-main` exits the JVM
-  when done. See doc/development.md for shell commands.
+  `-main` exits the JVM when done. See doc/development.md for the workflow.
 
   Results go under target/perf. Workloads publish a value, drain the inbox,
   reconcile, prepare patches and write a batch to a null stream. They exclude
@@ -73,9 +73,8 @@
 
 
 (defn fixture
-  "A workload with `:step`, `:close`, and its most recent prepared patch.
-  `:stage :render` stops before patch preparation and writing."
-  [{:keys [width depth mode stage] :or {depth 2 mode :sparse}}]
+  "A workload with `:step`, `:close`, and its most recent prepared patch."
+  [{:keys [width depth mode] :or {depth 2 mode :sparse}}]
   (let [source   (Cell. 100000)
         size     (Cell. width)
         sources  (if (#{:fanout :filtered} mode)
@@ -104,10 +103,9 @@
              (Inbox/.drain inbox changed)
              (let [frame (runtime/frame! rt root changed)]
                (ArrayList/.clear changed)
-               (when-not (= stage :render)
-                 (let [prepared (delivery/prepare-frame @!before frame)]
-                   (vreset! !last prepared)
-                   (sse/together conn #(delivery/send-frame! conn prepared))))
+               (let [prepared (delivery/prepare-frame @!before frame)]
+                 (vreset! !last prepared)
+                 (sse/together conn #(delivery/send-frame! conn prepared)))
                (vreset! !before frame)))
      :close (fn [] (runtime/dispose! rt) (sse/close! conn))}))
 

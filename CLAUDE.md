@@ -19,7 +19,9 @@ their release source (`native/build-zstd.sh`, `native/build-brotli.sh`, on macOS
 new release, check its signature (brotli signs none: check that the archive is the release commit), change the version
 and checksum in the script, rebuild, and log the build.
 
-Benchmarks are in `dev/bench` (`bench.signal`, `bench.frame`, `bench.sse`), run from the REPL under `bb dev`.
+Benchmarks are in `dev/bench`. `bench.signal`, `bench.frame` and `bench.sse` run from the REPL under `bb dev`;
+`bench.profile` runs in a fresh JVM through `bb bench`, for timing, allocation and JFR recordings. See
+`doc/development.md` for the commands.
 
 The wire is Datastar's SDK specification (`sdk/ADR.md` in the Datastar repository), implemented in-house in `sse` and
 `ring`: the client and its spec are the contract, and no Datastar server SDK is a dependency.

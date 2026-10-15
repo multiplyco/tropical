@@ -143,6 +143,70 @@
     (runtime/dispose! rt)))
 
 
+(defisland tree-node
+  {:key (fn [id _ _] id)}
+  [id nodes events]
+  (let [{:keys [label children]} (use-watch nodes #(get % id))]
+    (island/use-hold :lifetime
+      #(do (swap! events conj [:acquired id])
+         {:value id :release (fn [] (swap! events conj [:released id]))}))
+    [:section [:span label] (mapv #(tree-node % nodes events) children)]))
+
+
+(deftest a-recursive-island-owns-each-keyed-node
+  (let [nodes (atom {:root {:label "root" :children [:a :b]}
+                     :a {:label "a" :children [:leaf]}
+                     :b {:label "b" :children []}
+                     :leaf {:label "leaf" :children []}})
+        events (atom [])
+        failures (atom [])
+        root "tree-node.root"
+        a (str root "/tree-node.a")
+        b (str root "/tree-node.b")
+        leaf (str a "/tree-node.leaf")
+        {:keys [step rt]} (harness #(tree-node :root nodes events) {:tab "tab" :uid "user"}
+                            {:on-failure #(swap! failures conj %)})]
+    (try
+      (let [initial (step)
+            html (island/html initial)]
+        (is (empty? @failures) "each node can use the same hold key")
+        (is (= #{root a b leaf} (runtime/mounted rt)) "recursive calls place keyed children")
+        (is (= {[:acquired :root] 1 [:acquired :a] 1 [:acquired :b] 1 [:acquired :leaf] 1}
+               (frequencies @events)))
+        (swap! nodes assoc-in [:leaf :label] "changed")
+        (let [updated (step)]
+          (is (= [leaf] (mapv :id (:morph (island/patches initial updated)))))
+          (is (= {root 1 a 1 b 1 leaf 2} (runtime/render-counts rt)))
+          (is (= html (island/html initial)) "an earlier frame stays unchanged"))
+        (swap! nodes assoc-in [:root :children] [:b])
+        (step)
+        (is (= #{root b} (runtime/mounted rt)))
+        (is (= {[:released :a] 1 [:released :leaf] 1}
+               (frequencies (filter #(= :released (first %)) @events)))
+          "removing a branch releases its descendants, without releasing siblings"))
+      (finally (runtime/dispose! rt)))
+    (is (= {[:released :root] 1 [:released :a] 1 [:released :b] 1 [:released :leaf] 1}
+           (frequencies (filter #(= :released (first %)) @events))))
+    (is (empty? (clojure.lang.ARef/.getWatches nodes)))))
+
+
+(defn- named-island-render
+  [value]
+  [:p value])
+
+
+(defisland named-island
+  []
+  (named-island-render "from the helper"))
+
+
+(deftest an-islands-render-name-does-not-shadow-an-app-helper
+  (let [{:keys [step rt]} (harness named-island)]
+    (try
+      (is (str/includes? (island/html (step)) "from the helper"))
+      (finally (runtime/dispose! rt)))))
+
+
 (defisland five-args
   {:key (fn [a & _] a)}
   [a b c d e]
