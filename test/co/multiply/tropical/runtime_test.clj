@@ -48,6 +48,83 @@
     (is (empty? (ARef/.getWatches source)))))
 
 
+(deftest each-selection-of-a-source-can-invalidate-its-reader
+  (let [source (atom {:a 1 :b 1})
+        other (atom 1)
+        reader (island/island-fn "reader" nil
+                 (fn []
+                   [:p (island/use-watch source :a) "/"
+                    (island/use-watch source :b) "/" (island/use-watch other)]))
+        sibling (island/island-fn "sibling" nil (fn [] [:p (island/use-watch source :a)]))
+        root (island/island-fn "root" nil (fn [] [:main (reader) (sibling)]))
+        {:keys [step rt]} (harness root)]
+    (try
+      (let [initial (step)]
+        (swap! source assoc :b 2)
+        (is (re-find #">1/2/1<" (island/html (step))) "the second read can invalidate the island")
+        (is (= {"root" 1 "root/reader" 2 "root/sibling" 1} (runtime/render-counts rt)))
+        (reset! other 2)
+        (is (re-find #">1/2/2<" (island/html (step))) "another source's read can too")
+        (let [frame (step)]
+          (swap! source assoc :ignored 3)
+          (is (identical? frame (step)) "unchanged selections reuse the frame"))
+        (is (re-find #">1/1/1<" (island/html initial)) "retained frames are snapshots"))
+      (finally (runtime/dispose! rt)))
+    (is (empty? (ARef/.getWatches source)))
+    (is (empty? (ARef/.getWatches other)))))
+
+
+(deftest list-edits-keep-survivors-and-release-only-removed-children
+  (let [items (atom [[:a "A"] [:b "B"]])
+        values (atom {:a 0 :b 0 :c 0 :d 0})
+        opened (atom {})
+        released (atom {})
+        row (island/island-fn "row" {:key (fn [k _] k)}
+              (fn [k label]
+                (island/use-hold :lifetime
+                  #(do (swap! opened update k (fnil inc 0))
+                     {:value k :release (fn [] (swap! released update k (fnil inc 0)))}))
+                [:li label ":" (island/use-watch values #(get % k))]))
+        root (island/island-fn "root" nil
+               (fn [] (into [:ul] (map (fn [[k label]] (row k label))) (island/use-watch items))))
+        {:keys [step rt]} (harness root)]
+    (try
+      (let [initial (step)
+            html (island/html initial)]
+        (swap! values assoc :a 1)
+        (is (re-find #">A:1<" (island/html (step))))
+        (is (= {"root" 1 "root/row.a" 2 "root/row.b" 1} (runtime/render-counts rt)))
+        (testing "reorder, insertion, new arguments and a source change together"
+          (reset! items [[:b "B"] [:a "edited"] [:c "C"]])
+          (swap! values assoc :b 2)
+          (let [updated (island/html (step))]
+            (is (re-find #">edited:1<" updated))
+            (is (re-find #">B:2<" updated)))
+          (is (= {:a 1 :b 1 :c 1} @opened))
+          (is (empty? @released)))
+        (testing "a removed child may also have a pending invalidation"
+          (reset! items [[:b "B"] [:c "C"]])
+          (swap! values assoc :a 2)
+          (step)
+          (is (= {:a 1} @released))
+          (is (= #{"root" "root/row.b" "root/row.c"} (runtime/mounted rt))))
+        (reset! items [[:c "C"] [:d "D"]])
+        (step)
+        (is (= {:a 1 :b 1} @released))
+        (reset! items [])
+        (step)
+        (is (= {:a 1 :b 1 :c 1 :d 1} @released))
+        (is (empty? (ARef/.getWatches values)))
+        (reset! items [[:b "back"]])
+        (step)
+        (is (= {:a 1 :b 2 :c 1 :d 1} @opened) "a removed key mounts afresh")
+        (is (= html (island/html initial)) "list edits never mutate an earlier frame"))
+      (finally (runtime/dispose! rt)))
+    (is (= @opened @released) "every acquisition is released exactly once")
+    (is (empty? (ARef/.getWatches values)))
+    (is (empty? (ARef/.getWatches items)))))
+
+
 (deftest an-aborted-render-releases-its-new-acquisitions
   (let [source (atom 1)
         released (atom 0)
@@ -106,3 +183,28 @@
         (is (zero? @new-readers) "disposal releases every new ancestor hold")
         (runtime/dispose! rt)
         (is (= [1 0] [@old-readers @new-readers]) "a second disposal changes nothing")))))
+
+
+(deftest an-aborted-list-edit-disposes-kept-removed-and-new-children
+  (let [items (atom [:a :b])
+        opened (atom {})
+        released (atom {})
+        row (island/island-fn "row" {:key identity}
+              (fn [k]
+                (island/use-hold :lifetime
+                  #(do (swap! opened update k (fnil inc 0))
+                     {:value k :release (fn [] (swap! released update k (fnil inc 0)))}))
+                (when (= :fail k) (throw (OutOfMemoryError. "abort this list edit")))
+                [:li (name k)]))
+        root (island/island-fn "root" nil (fn [] [:ul (mapv row (island/use-watch items))]))
+        {:keys [step rt]} (harness root)]
+    (try
+      (let [initial (step)
+            html (island/html initial)]
+        (reset! items [:a :c :fail])
+        (is (thrown? OutOfMemoryError (step)))
+        (is (= {:a 1 :b 1 :c 1 :fail 1} @opened))
+        (is (= html (island/html initial)) "a partial edit cannot mutate a retained frame"))
+      (finally (runtime/dispose! rt)))
+    (is (= @opened @released) "all children release exactly once, even when pruning was interrupted")
+    (is (empty? (ARef/.getWatches items)))))

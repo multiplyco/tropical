@@ -18,6 +18,23 @@ bb native:brotli  # rebuild the libbrotlienc the jar ships, from brotli's releas
 
 The Java sources sit next to the Clojure ones in `src`, and compile into `target/classes`.
 
+`bench.profile` measures isolated island updates and records CPU and allocation samples with JFR. Run it in a fresh
+JVM after `bb compile:java`; loading the file directly avoids starting `dev/user.clj` and its REPL server:
+
+```sh
+clj -J-Xms512m -J-Xmx512m -M -i dev/bench/profile.clj -e '(bench.profile/-main "measure")'
+clj -J-Xms512m -J-Xmx512m -J-XX:FlightRecorderOptions=stackdepth=128 -M \
+  -i dev/bench/profile.clj -e '(bench.profile/-main "record" "sparse-1000")'
+clj -M -i dev/bench/profile.clj -e '(bench.profile/-main "summarize" "target/perf/sparse-1000.jfr")'
+```
+
+Pass a workload name after `"measure"` to run just that case. `bench.profile/workloads` lists the sparse, broad,
+filtered, deep-tree and list-change cases. Results and recordings go under `target/perf`, outside Git. Timing runs
+have JFR off; the recordings sample a warmed workload for ten seconds. The summary selects the main thread, as
+used by these commands. These measure publishing through patch writing to a null stream, excluding the pump's
+pacing, HTTP, compression and browser work. The older `bench.signal`, `bench.frame` and `bench.sse` benchmarks run
+from the development REPL; the frame benchmark changes the demo's alpha feed, so run it without other demo users.
+
 `bb dev` serves a demo page at <http://localhost:8080>. It is not part of the library: it lives in `dev/demo`, on the
 `:dev` alias only. `(user/reload!)` reloads changed Clojure code; a change to the Java needs `bb compile:java` and a
 restart. The JVM also serves [Remontoire](https://github.com/multiplyco/remontoire), an MCP endpoint into it, at

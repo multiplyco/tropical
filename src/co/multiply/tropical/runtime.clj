@@ -23,6 +23,7 @@
   (:import
     [co.multiply.tropical.island Js]
     [co.multiply.tropical.signal Inbox Sub]
+    [java.util Collection HashSet Iterator Set]
     [java.util.concurrent ThreadLocalRandom]))
 
 
@@ -284,7 +285,13 @@
       ;; Equal output keeps the old template, so nothing is patched.
       :template (if (= (:parts template) (:parts (:template inst))) (:template inst) template)
       :calls calls
-      :child-ids (if kept? (:child-ids inst) (mapv #(model/child-id id (model/call-slot %)) calls))
+      :child-ids (if kept?
+                   (:child-ids inst)
+                   (let [slots (:slots (:frame inst))]
+                     (mapv (fn [call]
+                             (let [slot (model/call-slot call)]
+                               (or (:id (get slots slot)) (model/child-id id slot))))
+                       calls)))
       :kept? kept?
       :renders (inc (:renders inst 0)))))
 
@@ -323,6 +330,7 @@
       (:frame inst)
       (let [render? (or (changed? inst call) (contains? dirty id))
             before  (:child-ids inst)
+            before-calls (:calls inst)
             inst    (or inst {:id id :parent parent :!state (atom {})})
             inst    (if render? (render-island rt inst call) inst)
             ;; Rendering has already acquired and released holds. Record their
@@ -330,32 +338,47 @@
             ;; release the new holds, never the ones just released.
             _       (when render? (vswap! (:!instances rt) assoc id inst))
             old     (:frame inst)
-            ;; The same children as the last frame's: start from its map of child
-            ;; frames, which then changes only where a child's frame did.
             kept?   (and old (or (not render?) (:kept? inst)))
             calls   (:calls inst)
             ids     (:child-ids inst)
             n       (count calls)
+            ;; Keep surviving child frames and their map, even across inserts,
+            ;; removals and reorders. The template records their document order.
             slots   (if kept?
                       (loop [i 0, slots (:slots old)]
                         (if (= i n)
                           slots
-                          (let [call  (nth calls i)
-                                slot  (model/call-slot call)
-                                child (reconcile rt (nth ids i) call id dirty on-path)]
-                            (recur (inc i) (if (identical? child (get slots slot)) slots (assoc slots slot child))))))
-                      (loop [i 0, slots (transient {})]
-                        (if (= i n)
-                          (persistent! slots)
-                          (let [call (nth calls i)]
-                            (recur (inc i)
-                              (assoc! slots (model/call-slot call) (reconcile rt (nth ids i) call id dirty on-path)))))))
+                          (let [child-id (nth ids i)]
+                            ;; Without a new parent render, its calls are the
+                            ;; same: only children on a changed path need a visit.
+                            (if (and (not render?) (not (contains? on-path child-id)))
+                              (recur (inc i) slots)
+                              (let [call  (nth calls i)
+                                    slot  (model/call-slot call)
+                                    child (reconcile rt child-id call id dirty on-path)]
+                                (recur (inc i) (if (identical? child (get slots slot)) slots (assoc slots slot child))))))))
+                      (let [slots (loop [i 0, slots (transient (or (:slots old) {}))]
+                                    (if (= i n)
+                                      slots
+                                      (let [call  (nth calls i)
+                                            slot  (model/call-slot call)
+                                            child (reconcile rt (nth ids i) call id dirty on-path)]
+                                        (recur (inc i) (if (identical? child (get slots slot)) slots (assoc! slots slot child))))))
+                            ;; Unmount after visiting the new children, in the
+                            ;; previous document order. Old frames stay immutable.
+                            slots (if (seq before)
+                                    (let [placed (HashSet. ^Collection ids)]
+                                      (reduce-kv (fn [slots i child-id]
+                                                   (if (HashSet/.contains placed child-id)
+                                                     slots
+                                                     (do (unmount-tree! rt child-id)
+                                                       (dissoc! slots (model/call-slot (nth before-calls i))))))
+                                        slots before))
+                                    slots)]
+                        (persistent! slots)))
             frame   (if (and old (identical? (:template old) (:template inst)) (identical? slots (:slots old)))
                       old
                       (model/->Frame id (:template inst) slots))]
-        (when (and render? (not kept?) (seq before))
-          (let [placed (set ids)]
-            (run! (fn [child-id] (when-not (contains? placed child-id) (unmount-tree! rt child-id))) before)))
         (vswap! (:!instances rt) assoc id (assoc inst :frame frame))
         frame))))
 
@@ -371,17 +394,37 @@
         true))))
 
 
+(defn- stale-read?
+  "Whether any of `reads` from `sub` would now select a different value."
+  [reads sub]
+  (loop [i 0]
+    (when (< i (count reads))
+      (let [read (nth reads i)]
+        (if (and (identical? sub (:sub read)) (stale? read))
+          true
+          (recur (inc i)))))))
+
+
 (defn- dirty-islands
   "Ids of islands that read one of the `changed` subscriptions and would now see
   a different value."
   [rt changed]
   (let [instances @(:!instances rt)]
-    (into #{}
-      (comp (mapcat (fn [^Sub sub] (map #(vector sub %) (.-readers sub))))
-        (filter (fn [[sub id]]
-                  (some #(and (identical? sub (:sub %)) (stale? %)) (:reads (get instances id)))))
-        (map second))
-      changed)))
+    (persistent!
+      (reduce (fn [dirty ^Sub sub]
+                (if-some [readers (.-readers sub)]
+                  ;; A shared source can have many readers in one session.
+                  ;; Iterate directly, without a lazy seq and pair per reader.
+                  (let [it (Set/.iterator readers)]
+                    (loop [dirty dirty]
+                      (if (Iterator/.hasNext it)
+                        (let [id (Iterator/.next it)]
+                          (recur (if (stale-read? (:reads (get instances id)) sub)
+                                   (conj! dirty id)
+                                   dirty)))
+                        dirty)))
+                  dirty))
+        (transient #{}) changed))))
 
 
 (defn- with-ancestors

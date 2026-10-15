@@ -7,6 +7,8 @@
 - `storage/observe` preserves a valid `false` instead of replacing it with the state's default.
 - Closing a session after a render fails past its error views, as running out of memory does, releases the holds
   its islands currently own, without leaking new holds or releasing already-dropped holds a second time.
+- Island updates do less work for unchanged siblings and allocate fewer temporary collections. Adding or removing
+  list items reuses the surviving children's ids and frame map, reducing allocation for large lists.
 
 ## 0.6.0 - 2026-10-15
 

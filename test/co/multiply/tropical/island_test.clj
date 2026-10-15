@@ -612,3 +612,39 @@
               (is false (str "step " n ": the client differs from the frame after " (pr-str patches))))))
         (is (< 100 spliced) "most edits sent only what changed")))
     (runtime/dispose! rt)))
+
+
+(deftest sibling-patches-bring-an-older-client-frame-up-to-date
+  (let [a (atom (texts [1 2]))
+        b (atom (texts [3 4]))
+        label (atom "initial")
+        group (island/island-fn "group" {:key (fn [k _] k)}
+                (fn [_ source] [:ul (mapv item (use-watch source))]))
+        status (island/island-fn "status" nil (fn [] [:p (use-watch label)]))
+        root (island/island-fn "root" nil (fn [] [:main (group :a a) (group :b b) (status)]))
+        {:keys [step rt]} (harness root)]
+    (try
+      (let [initial (step)
+            initial-html (island/html initial)]
+        (reset! a (texts [2 5]))
+        (swap! b assoc-in [0 :text] "intermediate")
+        (reset! label "intermediate")
+        (let [middle (step)
+              middle-html (island/html middle)]
+          (reset! a (texts [2 5 6]))
+          (reset! b (texts [4 7]))
+          (reset! label "latest")
+          (let [latest (step)
+                patches (island/patches initial latest)]
+            (is (= ["root/status"] (mapv :id (:morph patches)))
+              "an intermediate change to a now-removed child is not sent")
+            (is (= #{"root/group.a/item.1" "root/group.b/item.3"} (set (:remove patches))))
+            (is (= #{"root/group.a/item.5" "root/group.a/item.6" "root/group.b/item.7"}
+                   (into #{} (mapcat #(map :id (:frames %))) (:insert patches))))
+            (doseq [sent [initial middle]]
+              (let [client (parse (island/html sent))]
+                (patch-client! client (island/patches sent latest))
+                (is (= (serialize (parse (island/html latest))) (serialize client))))))
+          (is (= initial-html (island/html initial)))
+          (is (= middle-html (island/html middle)))))
+      (finally (runtime/dispose! rt)))))

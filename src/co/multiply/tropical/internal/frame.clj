@@ -116,10 +116,22 @@
 (declare patches)
 
 
+(defn- append-patches
+  "Appends the nonempty categories of `more` to `acc`. The first child's
+  immutable result can stand as it is, including through unchanged ancestors."
+  [acc more]
+  (if (identical? acc no-patches)
+    more
+    (cond-> acc
+      (seq (:morph more)) (update :morph into (:morph more))
+      (seq (:insert more)) (update :insert into (:insert more))
+      (seq (:remove more)) (update :remove into (:remove more)))))
+
+
 (defn- child-patches
   "The patches of the children of `frame` in `slots`, against those of `sent`."
   [sent frame slots]
-  (reduce (fn [acc slot] (merge-with into acc (patches (get (:slots sent) slot) (get (:slots frame) slot))))
+  (reduce (fn [acc slot] (append-patches acc (patches (get (:slots sent) slot) (get (:slots frame) slot))))
     no-patches
     slots))
 
@@ -146,7 +158,7 @@
   (when-some [^Splice splice (Splice/of (:parts (:template sent)) (:parts (:template frame))
                                (:slots sent) (:slots frame))]
     (when-some [insert (inserts sent frame splice)]
-      (merge-with into
+      (append-patches
         {:morph [] :insert insert :remove (mapv #(:id (get (:slots sent) %)) (.-removed splice))}
         (child-patches sent frame (.-changed splice))))))
 
