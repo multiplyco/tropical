@@ -179,12 +179,21 @@
   (assoc st :conn nil :detached-at (now)))
 
 
+(defn- close-stream!
+  "Closes `conn` without allowing a broken stream to interrupt session cleanup."
+  [conn]
+  (try
+    (sse/close! conn)
+    (catch Throwable t
+      (log/warn t "Closing a session's stream failed."))))
+
+
 (defn- close
   "Unmounts every island, releasing what they held, and ends the pump."
   [{:keys [rt conn session] :as st}]
   (log/debug "Session closing:" (:tab session))
   (unregister! session)
-  (when conn (sse/close! conn))
+  (when conn (close-stream! conn))
   (runtime/dispose! rt)
   (assoc st :closed? true :conn nil))
 
@@ -202,7 +211,7 @@
   [event]
   (when (vector? event)
     (case (first event)
-      :attach (sse/close! (second event))
+      :attach (close-stream! (second event))
       :ssr (deliver (second event) nil)
       nil)))
 
@@ -225,7 +234,7 @@
                   (do (sse/reload! conn)
                     st)
                   (do (when (and prev (not (identical? prev conn)))
-                        (sse/close! prev))
+                        (close-stream! prev))
                     (set-attached! (:session st) true)
                     ;; The client has what it was sent if the last id it read is
                     ;; the mark after it: then it gets only what changed since.
@@ -393,7 +402,7 @@
   since (`:attach`): often nothing, so the page isn't patched."
   [{:keys [conn recycle-at] :as st}]
   (if (and conn recycle-at (<= (long recycle-at) (now)))
-    (do (sse/close! conn)
+    (do (close-stream! conn)
       (detach st))
     st))
 
@@ -421,7 +430,13 @@
   (Inbox/.await inbox ms)
   (loop [st st]
     (if-some [ev (Inbox/.poll inbox)]
-      (recur (handle st ev))
+      (recur (try
+               (handle st ev)
+               (catch Throwable t
+                 ;; `ev` has left the inbox but may not have been installed in
+                 ;; `st`. Answer it too, then close with the last owned state.
+                 (turn-away! ev)
+                 (fail st t))))
       st)))
 
 
@@ -575,7 +590,7 @@
   ([session sse load last-id]
    (post! session [:attach sse load last-id])
    (when (realized? (:closed session))
-     (sse/close! sse))))
+     (close-stream! sse))))
 
 
 (defn ^:no-doc detach!

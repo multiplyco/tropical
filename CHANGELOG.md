@@ -18,6 +18,12 @@
   reference, and its log lines share it. Repeats are logged without the stack trace, at doubling counts, and the end
   of the run with its count. Recent stack traces are shared across instances of the same definition, each new run's
   line naming the reference that has the trace. Error-view failures are tracked independently under the same reference.
+- A resource's failure can no longer be overwritten by a concurrent emission, leaving readers on a stale value.
+- A failing hold release or stream close no longer interrupts the rest of session cleanup. Failed stream attachments
+  close both connections, and a page that throws releases its session without waiting for the reconnect grace period.
+- Uploads become failed when starting the browser's request or an arrival or settlement callback throws, including
+  assertions. Repeated reports do not retry failed callbacks, and failures in both callbacks preserve the original
+  exception.
 
 ## 0.6.0 - 2026-10-15
 

@@ -28,8 +28,8 @@
                    :depends [compile:java test:browser]
                    :task    (apply shell "clj" "-M:test" *command-line-args*)}
 
-  test:browser    {:doc  "Test the embedded browser-state programs (requires Node.js)"
-                   :task (shell "node --test test/browser-state.test.mjs")}
+  test:browser    {:doc  "Test the browser-state and upload programs (requires Node.js)"
+                   :task (shell "node --test test/browser-state.test.mjs test/upload.test.mjs")}
 
   test:linux      {:doc      "Run tests in Linux, under JDK 25 in Docker: amd64 (default), arm64, amd64-musl, arm64-musl, all"
                    :depends  [compile:java test:browser]

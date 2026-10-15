@@ -7,8 +7,8 @@ alike.
 ```
 bb dev            # compile the Java, start the demo page with nREPL and Remontoire
 bb dev:readable   # the same, with the app's names readable in the browser, for debugging
-bb test           # compile the Java, run the JVM and browser-state tests (Node.js required)
-bb test:browser   # test the embedded cookie/storage JavaScript, with Node.js
+bb test           # compile the Java, run the JVM and browser tests (Node.js required)
+bb test:browser   # test the cookie/storage and upload JavaScript, with Node.js
 bb test:linux     # the tests in Linux, under JDK 25 in Docker: amd64, arm64, amd64-musl, arm64-musl, or all
 bb lint           # clj-kondo, under the config the jar exports
 bb bench          # compile the Java, then measure isolated workloads in a fresh JVM

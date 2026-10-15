@@ -482,45 +482,51 @@
   fetches a page, and a tab id, of its own."
   [app req uid]
   (let [tab     (str (random-uuid))
-        session (kept-by req (session/create! tab uid (with-request app req)))
-        {:keys [frame scripts] :as page} (session/render-page! session)
-        ;; Without a frame, an element with the root island's id, for the
-        ;; fresh session the stream resyncs to patch it into.
-        placeholder (delay
-                      (when-some [root (try
-                                         (kept-by req ((:root app) {:tab tab :uid uid :request req}))
-                                         (catch Exception e
-                                           (log/warn e "The root island's placeholder: :root threw.")
-                                           nil))]
-                        [:div {:id (island/element-id (island/call-slot root))}]))
-        !marks      (atom #{})
-        ;; Outside the page: it renders the page's attributes itself.
-        revision    (revision-of app req)
-        body        (scoping [storage/*owner* (storage/owner uid)
-                              page/*page* {:tab              tab
-                                           :frame            frame
-                                           :scripts          scripts
-                                           :placeholder      placeholder
-                                           :open-when-hidden (:open-when-hidden app)
-                                           :revision         revision
-                                           :!marks           !marks}]
-                      ((:page app) {:tab tab :frame frame :scripts scripts :request req}))]
-    (when (or (not page) (not (contains? @!marks :stream)))
-      (session/close! session))
-    (when (and page (contains? @!marks :scripts))
-      (session/scripts-in-page! session))
-    ;; A page that opens no stream renders fine and never updates: fail it.
-    (when-not (contains? @!marks :stream)
-      (throw (IllegalStateException.
-               (str "The app's :page opened no stream for its tab, so the page would never update: "
-                 "render the app's element with ring/mount, or put (ring/stream-init tab) in an element's data-init."))))
-    (when (and (not (contains? @!marks :state)) (compare-and-set! (::unkept app) false true))
-      (log/warn (str "The app's :page has no ui/page-attrs, which ring/mount adds: the state the browser owns isn't "
-                  "kept, and files dropped outside a drop area open in the tab. Logged once.")))
-    {:status  200
-     :headers {"Content-Type"  "text/html; charset=utf-8"
-               "Cache-Control" "no-store"}
-     :body    body}))
+        session (kept-by req (session/create! tab uid (with-request app req)))]
+    (try
+      (let [{:keys [frame scripts] :as page} (session/render-page! session)
+            ;; Without a frame, an element with the root island's id, for the
+            ;; fresh session the stream resyncs to patch it into.
+            placeholder (delay
+                          (when-some [root (try
+                                             (kept-by req ((:root app) {:tab tab :uid uid :request req}))
+                                             (catch Exception e
+                                               (log/warn e "The root island's placeholder: :root threw.")
+                                               nil))]
+                            [:div {:id (island/element-id (island/call-slot root))}]))
+            !marks      (atom #{})
+            ;; Outside the page: it renders the page's attributes itself.
+            revision    (revision-of app req)
+            body        (scoping [storage/*owner* (storage/owner uid)
+                                  page/*page* {:tab              tab
+                                               :frame            frame
+                                               :scripts          scripts
+                                               :placeholder      placeholder
+                                               :open-when-hidden (:open-when-hidden app)
+                                               :revision         revision
+                                               :!marks           !marks}]
+                          ((:page app) {:tab tab :frame frame :scripts scripts :request req}))]
+        (when (or (not page) (not (contains? @!marks :stream)))
+          (session/close! session))
+        (when (and page (contains? @!marks :scripts))
+          (session/scripts-in-page! session))
+        ;; A page that opens no stream renders fine and never updates: fail it.
+        (when-not (contains? @!marks :stream)
+          (throw (IllegalStateException.
+                   (str "The app's :page opened no stream for its tab, so the page would never update: "
+                     "render the app's element with ring/mount, or put (ring/stream-init tab) in an element's data-init."))))
+        (when (and (not (contains? @!marks :state)) (compare-and-set! (::unkept app) false true))
+          (log/warn (str "The app's :page has no ui/page-attrs, which ring/mount adds: the state the browser owns isn't "
+                      "kept, and files dropped outside a drop area open in the tab. Logged once.")))
+        {:status  200
+         :headers {"Content-Type"  "text/html; charset=utf-8"
+                   "Cache-Control" "no-store"}
+         :body    body})
+      (catch Throwable t
+        ;; No page can attach to this session. Revoke its actions and release
+        ;; its resources now, including when the page or its revision throws.
+        (session/close! session)
+        (throw t)))))
 
 
 (deftype StreamBody [session load last-id hold? encoding]

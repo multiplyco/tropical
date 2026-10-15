@@ -98,6 +98,11 @@ and coalescing come from the runtime and the session pump instead, and are cover
   its failure to the registry, where a cleanup fn returned for a loop would hide it: readers would stay on the crashed
   loop's last value, and nothing would reopen it. Unlike Missionary's, `emit!` keeps only the latest value, as signals
   do.
+- **Failure is terminal for a resource's readers.** Each resource serializes its emissions with marking itself
+  closed. The failure is published after that mark, so an emitter already running cannot overwrite it. This
+  uses the resource's own monitor; independent resources still publish concurrently. Registry updates and the
+  subject's cleanup run outside that monitor, so closing under the registry lock cannot deadlock with an emitter
+  waiting to mark its resource live.
 - **Keyed by call site and arguments, with nothing captured.** The key decides who shares a resource, so it must cover
   everything the open fn depends on. An explicit key fails unsafe: a dependency left out of it serves one reader's
   resource to another, such as one account's data to another account, silently. Keying on the call site and the

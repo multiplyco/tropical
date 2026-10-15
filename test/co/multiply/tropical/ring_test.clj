@@ -696,6 +696,32 @@
     (is (eventually #(empty? (filter (fn [s] (= uid (:uid s))) (vals @session/!sessions)))) "and its session closes")))
 
 
+(deftest a-failed-page-releases-its-session
+  (doseq [failed-at [:page :revision]]
+    (testing (name failed-at)
+      (let [opened (promise)
+            released (promise)
+            failure (AssertionError. "page failed")
+            root (island/island-fn "page-lifetime" nil
+                   (fn []
+                     (island/use-hold :held #(hash-map :value true :release (fn [] (deliver released true))))
+                     [:p "ready"]))
+            app (assoc (mounting (fn [{:keys [tab]}]
+                                   (deliver opened (get @session/!sessions tab))
+                                   (root)))
+                  failed-at (fn [_] (throw failure)))
+            handler (ring/handler app)]
+        (try
+          (is (identical? failure (try (handler (request :get "/mounted" "alice" {}))
+                                    (catch Throwable t t))))
+          (is (deref released 1000 false) "a page that cannot be delivered releases immediately")
+          (is (deref (:closed @opened) 1000 false))
+          (finally
+            (when-some [s (deref opened 0 nil)]
+              (session/close! s)
+              (deref (:closed s) 1000 false))))))))
+
+
 (deftest a-page-without-page-attrs-is-logged-once
   (let [!logged (atom [])
         app     (assoc (mounting (fn [_] (hello)))

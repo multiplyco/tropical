@@ -66,8 +66,10 @@
   (when release
     (try
       (release)
-      (catch Exception e
-        (log/warn e "Releasing a hold of island" id "failed.")))))
+      (catch Throwable t
+        ;; Cleanup is best-effort, as a resource's undo is: even an assertion
+        ;; must not strand the other holds or replace a render's failure.
+        (log/warn t "Releasing a hold of island" id "failed.")))))
 
 
 (defn- add-reader!

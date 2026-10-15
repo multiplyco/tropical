@@ -77,7 +77,7 @@ hygiene.
 
 ## Testing
 
-`bb test` runs the JVM tests (kaocha) and the browser-state JavaScript tests (Node.js). `bb test:linux` runs the
+`bb test` runs the JVM tests (kaocha) and the browser JavaScript tests (Node.js). `bb test:linux` runs the
 JavaScript tests once on the host, then the JVM tests in Linux containers under JDK 25 (amd64 by default, or arm64,
 musl, `all`), where the shipped libraries are what's tested. `bb test:browser` runs only the JavaScript tests.
 Test philosophy: invariants over wording. Exact error messages and renderings drift by design — don't pin them.

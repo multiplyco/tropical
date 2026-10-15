@@ -255,3 +255,42 @@
       (finally (runtime/dispose! rt)))
     (is (= @opened @released) "all children release exactly once, even when pruning was interrupted")
     (is (empty? (ARef/.getWatches items)))))
+
+
+(deftest a-throwing-release-does-not-interrupt-ownership-changes
+  (doseq [ending [:drop :unmount :dispose :abort]]
+    (testing (name ending)
+      (let [source (atom 0)
+            shown (atom true)
+            held (atom true)
+            released (atom [])
+            child (island/island-fn "child" nil
+                    (fn []
+                      (island/use-watch source)
+                      (when (island/use-watch held)
+                        (doseq [k [:broken :other]]
+                          (island/use-hold k
+                            #(hash-map :value k :release
+                               (fn []
+                                 (swap! released conj k)
+                                 (when (= :broken k) (throw (AssertionError. "cleanup failed"))))))))
+                      (when (= :abort ending) (throw (OutOfMemoryError. "abort the render")))
+                      [:p "child"]))
+            root (island/island-fn "root" nil
+                   (fn [] [:main (when (island/use-watch shown) (child))]))
+            {:keys [step rt]} (harness root)]
+        (try
+          (if (= :abort ending)
+            (is (thrown? OutOfMemoryError (step)) "cleanup preserves the render's original failure")
+            (do
+              (step)
+              (case ending
+                :drop (do (reset! held false) (step))
+                :unmount (do (reset! shown false) (step))
+                :dispose (runtime/dispose! rt))))
+          (is (= [:broken :other] @released) "the other release still runs")
+          (finally (runtime/dispose! rt)))
+        (is (= [:broken :other] @released) "neither hold is released twice")
+        (is (empty? (ARef/.getWatches source)))
+        (is (empty? (ARef/.getWatches shown)))
+        (is (empty? (ARef/.getWatches held)))))))

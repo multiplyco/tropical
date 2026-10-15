@@ -14,6 +14,7 @@
     [co.multiply.tropical.sse :as sse]
     [co.multiply.tropical.test-util :refer [entry manual-source observe-source]])
   (:import
+    [co.multiply.tropical.signal Inbox]
     [java.util.concurrent CountDownLatch]))
 
 
@@ -195,6 +196,43 @@
     (is (< (- (System/nanoTime) t0) 1e9) "the page doesn't wait out the render timeout")
     (is (deref (:closed s) 1000 false))
     (is (nil? (get @session/!sessions tab)))))
+
+
+(deftest a-failed-attach-closes-both-streams-and-answers-waiting-events
+  (let [inbox (Inbox.)
+        rt (runtime/runtime {:tab "failed-attach"} inbox)
+        closed (atom [])
+        page (promise)
+        session {:tab "failed-attach" :inbox inbox :closed (promise)}
+        st {:session session :rt rt :conn :previous :load "original"}]
+    (with-redefs [sse/reload! (fn [_] (throw (AssertionError. "reload failed")))
+                  sse/close! (fn [conn] (swap! closed conj conn))]
+      (Inbox/.post inbox [:attach :copy "copied"])
+      (Inbox/.post inbox [:ssr page])
+      (let [next (#'session/handle-events st inbox 0)]
+        (is (:closed? next))
+        (is (= #{:previous :copy} (set @closed)) "neither the old nor the rejected connection stays open")
+        (is (realized? page) "the remaining events are answered")
+        (is (nil? (deref page 0 ::unanswered)))))
+    (runtime/dispose! rt)))
+
+
+(deftest a-stream-that-throws-on-close-does-not-prevent-session-cleanup
+  (let [released (promise)
+        root (island/island-fn "release-on-close" nil
+               (fn []
+                 (island/use-hold :held #(hash-map :value true :release (fn [] (deliver released true))))
+                 [:p "ready"]))]
+    (with-redefs [sse/together (fn [_ f] (f))
+                  sse/heartbeat! (fn [_] true)
+                  sse/close! (fn [_] (throw (AssertionError. "close failed")))]
+      (let [s (session/create! (str (random-uuid)) "u" {:root (fn [_] (root))})]
+        (session/render-page! s)
+        (session/attach! s :conn "load")
+        (session/close! s)
+        (is (deref (:closed s) 1000 false))
+        (is (deref released 0 false))
+        (is (not (session/held? (:tab s))))))))
 
 
 (deftest a-closed-session-turns-events-away

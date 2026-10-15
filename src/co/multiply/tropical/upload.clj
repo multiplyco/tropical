@@ -183,7 +183,7 @@
               fail  #(cond-> % (ids (:id %)) (assoc :state :failed :reason "The upload couldn't be taken in."))]
           (try
             (settled batch)
-            (catch Exception e
+            (catch Throwable e
               (swap! !uploads #(mapv fail %))
               (throw e)))
           (swap! !uploads (fn [uploads] (filterv #(not (ids (:id %))) uploads))))))))
@@ -198,8 +198,9 @@
     (do
       (try
         (settled! held settled)
-        (catch Exception e
-          (Throwable/.addSuppressed thrown e)))
+        (catch Throwable e
+          (when-not (identical? thrown e)
+            (Throwable/.addSuppressed thrown e))))
       (throw thrown))
     (settled! held settled)))
 
@@ -215,7 +216,7 @@
                                  [(if (and (map? verdict) (contains? verdict :refused))
                                     {:state :refused :reason (:refused verdict)}
                                     {:state :arrived})])
-                               (catch Exception e
+                               (catch Throwable e
                                  [{:state :failed :reason "The upload couldn't be checked."} e]))]
         (ended! held settled id outcome thrown)))))
 

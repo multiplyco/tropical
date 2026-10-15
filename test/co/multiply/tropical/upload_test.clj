@@ -276,6 +276,42 @@
     (runtime/dispose! rt)))
 
 
+(deftest an-upload-callback-error-settles-the-upload-once
+  (doseq [callback [:arrived :settled]]
+    (testing (name callback)
+      (let [error (AssertionError. "callback failed")
+            calls (atom 0)
+            {:keys [rt step token uploads] :as p}
+            (page "alice" {:target (target (atom []) 10)
+                           callback (fn [_] (swap! calls inc) (throw error))})
+            id (pick! p "alice")]
+        (try
+          (is (identical? error (try (post token "alice" {"arrived" id}) (catch Throwable t t))))
+          (step)
+          (is (= [:failed] (mapv :state (uploads))))
+          (post token "alice" {"arrived" id})
+          (is (= 1 @calls) "a repeated report does not retry a failed callback")
+          (finally (runtime/dispose! rt)))))))
+
+
+(deftest arrival-and-settlement-may-throw-the-same-exception
+  (let [error (ex-info "shared failure" {})
+        fail? (atom false)
+        {:keys [rt step token uploads] :as p}
+        (page "alice" {:target (target (atom []) 10)
+                       :arrived (fn [_] (when @fail? (throw error)))
+                       :settled (fn [_] (throw error))})
+        [a b] (picks! p 2)]
+    (try
+      (post token "alice" {"arrived" a})
+      (reset! fail? true)
+      (is (identical? error (try (post token "alice" {"arrived" b}) (catch Throwable t t)))
+        "the original exception survives instead of a self-suppression error")
+      (step)
+      (is (= [:failed :failed] (mapv :state (uploads))))
+      (finally (runtime/dispose! rt)))))
+
+
 (defisland nested-areas
   "A drop area for one list of files, holding one for another, giving the test
   their `start`s through `!out`."

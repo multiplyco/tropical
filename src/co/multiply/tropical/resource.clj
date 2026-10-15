@@ -143,7 +143,9 @@
       (q/finally
         (fn [_ e cancelled?]
           (when (or e cancelled?)
-            (let [undo (AtomicReference/.getAndSet !undo closed)]
+            ;; Serialize closure with an emission's check-and-publish. Once
+            ;; this finishes, no in-flight emit can overwrite fail!'s Failed.
+            (let [undo (locking !undo (AtomicReference/.getAndSet !undo closed))]
               (when (fn? undo)
                 (undo! key undo)))))))))
 
@@ -158,11 +160,15 @@
         !undo  (AtomicReference.)
         live?  (volatile! (not (identical? pending init)))
         emit!  (fn [v]
-                 (when-not (identical? closed (AtomicReference/.get !undo))
-                   (Cell/.reset !value v)
-                   (when-not @live?
-                     (vreset! live? true)
-                     (mark-live! key !value)))
+                 (let [first? (locking !undo
+                                (when-not (identical? closed (AtomicReference/.get !undo))
+                                  (Cell/.reset !value v)
+                                  (when-not @live?
+                                    (vreset! live? true)
+                                    true)))]
+                   ;; Registry work stays outside the publication lock: opening
+                   ;; and closing hold the registry lock and may cancel tasks.
+                   (when first? (mark-live! key !value)))
                  nil)
         ;; Compelled: the resource belongs to the registry, not to whichever
         ;; session happened to subscribe first.

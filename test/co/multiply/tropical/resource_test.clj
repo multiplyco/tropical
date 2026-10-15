@@ -228,6 +228,45 @@
     (runtime/dispose! rt)))
 
 
+(deftest concurrent-emissions-cannot-replace-a-terminal-failure
+  (let [fail! @#'resource/fail!]
+    (dotimes [_ 60]
+      (let [opened (promise)
+            fail (promise)
+            failed (promise)
+            gate (CountDownLatch. 1)
+            key [::racing-failure (random-uuid)]
+            error (ex-info "source stopped" {})]
+        (with-redefs [resource/fail! (fn [k cell e]
+                                       (fail! k cell e)
+                                       (when (= k key) (deliver failed true)))]
+          (let [cell (resource/acquire! key (fn [emit!]
+                                              (deliver opened emit!)
+                                              (q/task (throw @fail))))
+                emit! (deref opened 2000 nil)]
+            (try
+              (is (some? emit!))
+              (when emit!
+                (let [workers (mapv (fn [_]
+                                      (q/task
+                                        (when-not (CountDownLatch/.await gate 2 TimeUnit/SECONDS)
+                                          (throw (ex-info "emitters were not started" {})))
+                                        (dotimes [_ 2000] (emit! :late))))
+                                (range 6))]
+                  (CountDownLatch/.countDown gate)
+                  (deliver fail error)
+                  (is (deref failed 2000 false) "failure publication finishes alongside the emitters")
+                  (is (every? #(deref (q/await % 2000) 3000 false) workers))
+                  (is (every? #(nil? (q/get-ex %)) workers))
+                  (emit! :after)
+                  (is (identical? error (:error @cell)) "neither an in-flight nor a later emit can revive it")))
+              (finally
+                (CountDownLatch/.countDown gate)
+                (deliver fail error)
+                (deref failed 2000 false)
+                (resource/release! key cell)))))))))
+
+
 (deftest a-new-key-releases-the-old-resource
   (let [[_ subject] (manual-source)
         !key (atom [::path :a])

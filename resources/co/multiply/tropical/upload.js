@@ -66,7 +66,9 @@ export async function start($, token, files) {
     const file = files[i]
     progress($, target.id, 0, file.size)
     queue.push(async () => {
-      const reason = await send($, file, target)
+      // Opening the request, setting headers or sending can throw before an
+      // XHR event fires. Settle those uploads too, so they don't stay uploading.
+      const reason = await send($, file, target).catch(() => "The upload couldn't be started.")
       if (!reason) progress($, target.id, file.size, file.size)
       try {
         await post(token, reason ? {failed: target.id, reason} : {arrived: target.id})
