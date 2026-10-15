@@ -588,11 +588,33 @@ reading it, learns the app's layout from it.
   message can carry what the user shouldn't see: a query, an id, another service's error. So the default says only
   that a part of the page failed, without naming the island, and an app that wants more, in development, gives its
   own `:error-view`.
-- **A reference per failure.** Each failure gets 40 random bits, as `4KF7-Q2XM`, in the line logging it and in the
-  failure its view gets, and the default view shows them. A user reports what they saw, and the log has the exception
-  under the same reference, while the page carries nothing about it. Random, not a digest of the exception: the same
-  failure twice is two reports, each with its own time and session. The library logs every failure, whichever view
-  renders it, so a view that forgets to log loses nothing, and one that reports elsewhere sends the reference along.
+- **A reference per run of failures.** A failure gets 40 random bits, as `4KF7-Q2XM`, in the line logging it and in
+  the failure its view gets, and the default view shows them. A user reports what they saw, and the log has the
+  exception under the same reference, while the page carries nothing about it. An island failing again the same way,
+  the same exception class thrown from the same place, keeps its reference until it renders successfully or unmounts.
+  One reading a feed that ticks would otherwise show a new reference each tick, gone before the user reads it out.
+  The message isn't compared, since it often carries the very data that changed. Random, not a digest of the
+  exception: the same failure in two sessions is two reports, each with its own time and session. The library logs
+  every run of failures, whichever view renders it, so a view that forgets to log loses nothing, and one that reports
+  elsewhere sends the reference along.
+- **Throttling repeats and sharing traces.** A run's first failure is logged with its stack trace, its repeats
+  without it at doubling counts, so a thousand repeats make about ten lines, and its end with its count. Recent traces
+  are shared across instances of the same island definition: another run gets a line naming the reference whose
+  line has the trace. This reduces duplicate stack traces; every new run still produces a line. A missing stack
+  trace keeps the last known site. When a run first gains a trace, it records the site and logs the trace, or names
+  a recent one, even if that repeat's count would otherwise be suppressed.
+- **Bookkeeping follows its owner.** Java `Failure` holds the mounted instance's reference, counts and log decisions,
+  accessed only by its session pump. Each definition owns a Java `TraceCache`, shared by its instances, with at most
+  64 entries and a one-minute deduplication window. Capacity can evict a trace earlier. A short synchronized operation
+  checks expiry, claims a reference and evicts the oldest entry; logging happens outside the lock. A render or error
+  view consults the cache when starting a sequence of failures, or when that sequence first gains a stack trace.
+  Ordinary repeats stay local. There is no process-wide registry, and a retired definition takes its cache with it
+  when collected. The shared cache retains no exceptions, views or session contexts. `internal.failure` routes the
+  decisions through tools.logging.
+- **Error views have independent failures.** Each view has its own consecutive failure count under the island's
+  reference, reset when that view renders successfully. A new view exception is logged even when the original
+  render's repeat is suppressed. Render and error-view traces occupy separate cache entries, so one cannot suppress
+  the other's first trace.
 - **An island's own view, not a boundary.** An island can replace the app's view for itself, as for a chart whose
   failure has something particular to say. It covers that island only. A child's failure never reaches its parent,
   since each renders on its own, so nothing is there for a subtree to catch, as React's error boundaries do. A view

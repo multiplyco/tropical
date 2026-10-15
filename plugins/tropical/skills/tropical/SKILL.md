@@ -339,6 +339,9 @@ plain function returning hiccup, called inside islands.
   `(island/element-id path)` maps a path to its digest.
 - `(resource/summary)` lists the open resources, their readers and state.
 - A failed island is logged with its path, its element id and its reference, which the default view shows the user.
+  One failing again the same way keeps its reference; repeat lines are throttled, and recent stack traces are shared
+  across instances. A line can name an earlier reference that has its trace. Error-view failures are tracked
+  independently under the island's reference.
 
 ## Traps
 

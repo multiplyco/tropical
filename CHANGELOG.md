@@ -13,6 +13,11 @@
   islands update together.
 - An island can call itself to place keyed child islands, as in a tree view. Self-calls previously rendered inline,
   sharing the parent's reads, state and holds instead of creating child islands.
+- An island failing again the same way, the same exception class thrown from the same place, keeps its failure's
+  reference until it renders successfully or unmounts, where each render made a new one: the user reads out one
+  reference, and its log lines share it. Repeats are logged without the stack trace, at doubling counts, and the end
+  of the run with its count. Recent stack traces are shared across instances of the same definition, each new run's
+  line naming the reference that has the trace. Error-view failures are tracked independently under the same reference.
 
 ## 0.6.0 - 2026-10-15
 

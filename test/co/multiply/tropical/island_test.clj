@@ -396,7 +396,8 @@
 
 (deftest a-failures-reference-is-in-its-log-line-and-the-default-view
   (let [!logged (atom [])
-        {:keys [step rt]} (harness failing-host {:tab "tab" :uid "user"} {})
+        broken (island/island-fn "failing" nil (fn [] (throw (ex-info "failing 7" {}))))
+        {:keys [step rt]} (harness broken {:tab "tab" :uid "user"} {})
         html    (binding [log/*logger-factory* (capturing !logged)]
                   (island/html (step)))
         ref     (second (re-find #"Reference (\w{4}-\w{4})" html))]
@@ -407,6 +408,109 @@
                 (and (= :error level) (str/includes? message ref) (= "failing 7" (ex-message t))))
           @!logged)
       "the line logging the exception has it")))
+
+
+(defn- reference-in
+  [frame]
+  (second (re-find #"Reference (\w{4}-\w{4})" (island/html frame))))
+
+
+(defn- lines-with
+  "What `!logged` holds that names `ref`."
+  [!logged ref]
+  (filter (fn [[_ message]] (str/includes? message ref)) @!logged))
+
+
+(deftest an-island-failing-the-same-way-keeps-its-reference
+  (let [!logged  (atom [])
+        !failures (atom [])
+        source   (atom 0)
+        flaky    (island/island-fn "flaky" nil
+                   (fn []
+                     (let [n (use-watch source)]
+                       (throw (if (< n 100)
+                                (ex-info (str "failure " n) {})
+                                ;; As the JVM throws an exception it optimized: without a stack trace.
+                                (doto (ex-info "optimized" {})
+                                  (.setStackTrace (make-array StackTraceElement 0))))))))
+        {:keys [step rt]} (harness flaky {:tab "tab" :uid "user"} {:on-failure #(swap! !failures conj %)})
+        refs     (binding [log/*logger-factory* (capturing !logged)]
+                   (try
+                     (doall (for [n (range 101)]
+                              (do (reset! source n)
+                                (reference-in (step)))))
+                     (finally
+                       (runtime/dispose! rt))))
+        ref      (first refs)
+        lines    (lines-with !logged ref)]
+    (is (= 101 (count refs) (count @!failures)) "every failure renders the error view and reaches :on-failure")
+    (is (= #{ref} (set refs) (set (map :ref @!failures)))
+      "one reference while it fails the same way, whatever the message, even without a stack trace")
+    (is (= 1 (count (filter #(nth % 2) lines))) "one stack trace")
+    (is (< (count lines) 10) "a hundred repeats, a few lines")
+    (is (some #(= :info (first %)) lines) "the run's end, when it unmounts")))
+
+
+(deftest a-new-run-of-failures-gets-a-new-reference
+  (let [!logged (atom [])
+        source  (atom [:a 0])
+        flaky   (island/island-fn "flaky" nil
+                  (fn []
+                    (case (first (use-watch source))
+                      :a (throw (ex-info "a" {}))
+                      :elsewhere (throw (ex-info "the same class, thrown elsewhere" {}))
+                      :b (throw (IllegalStateException. "another class"))
+                      [:p "rendered"])))
+        {:keys [step rt]} (harness flaky {:tab "tab" :uid "user"} {})
+        next!   (fn [kind]
+                  (swap! source (fn [[_ n]] [kind (inc n)]))
+                  (reference-in (step)))
+        ended?  (fn [ref] (some #(= :info (first %)) (lines-with !logged ref)))]
+    (binding [log/*logger-factory* (capturing !logged)]
+      (let [a1        (reference-in (step))
+            a1'       (next! :a)
+            elsewhere (next! :elsewhere)
+            b         (next! :b)
+            rendered  (next! :ok)
+            a2        (next! :a)
+            a2'       (next! :a)]
+        (runtime/dispose! rt)
+        (is (= a1 a1'))
+        (is (= 4 (count (distinct [a1 elsewhere b a2]))) "another place, another class, or after rendering")
+        (is (nil? rendered))
+        (is (= a2 a2'))
+        (is (ended? a1) "a run of failures ends when the island fails another way")
+        (is (ended? a2) "or unmounts")
+        (is (not (ended? elsewhere)) "a single failure has no end to log")
+        (is (some (fn [[_ message t]] (and (nil? t) (str/includes? message a1)))
+              (lines-with !logged a2))
+          "a failure logged with its trace within the window stands for the same failure again")))))
+
+
+(deftest the-same-failure-elsewhere-logs-its-trace-once
+  (let [!logged  (atom [])
+        source   (atom 0)
+        broken   (island/island-fn "broken" nil
+                   (fn []
+                     (use-watch source)
+                     (throw (ex-info "broken" {}))))
+        sessions (fn []
+                   (let [harnesses (doall (repeatedly 3 #(harness broken {:tab "tab" :uid "user"} {})))]
+                     (try
+                       (mapv #(reference-in ((:step %))) harnesses)
+                       (finally
+                         (run! #(runtime/dispose! (:rt %)) harnesses)))))]
+    (binding [log/*logger-factory* (capturing !logged)]
+      (let [[first-ref & others :as refs] (sessions)
+            traces (filter #(nth % 2) @!logged)]
+        (is (= 3 (count (distinct refs))) "each session's failure has its own reference")
+        (is (= 1 (count traces)) "one stack trace")
+        (is (str/includes? (second (first traces)) first-ref))
+        (doseq [ref others]
+          (is (some (fn [[level message t]]
+                      (and (= :error level) (nil? t) (str/includes? message ref) (str/includes? message first-ref)))
+                @!logged)
+            "the others are logged, naming the reference that has the trace"))))))
 
 
 (defisland own-view

@@ -16,16 +16,16 @@
   (:require
     [clojure.string :as str]
     [clojure.tools.logging :as log]
+    [co.multiply.tropical.internal.failure :as failure]
     [co.multiply.tropical.internal.frame :as frame]
     [co.multiply.tropical.internal.model :as model]
     [co.multiply.tropical.island :as island]
     [co.multiply.tropical.resource :as resource])
   (:import
     [co.multiply.tropical.island Js]
-    [co.multiply.tropical.runtime Instance ReadBuffer ReadBuffer$Read]
+    [co.multiply.tropical.runtime Failure Instance ReadBuffer ReadBuffer$Read]
     [co.multiply.tropical.signal Inbox Sub]
-    [java.util Collection HashSet Iterator Set]
-    [java.util.concurrent ThreadLocalRandom]))
+    [java.util Collection HashSet Iterator Set]))
 
 
 ;; Instance holds one island's mutable bookkeeping, owned by the session pump.
@@ -112,50 +112,32 @@
   (and (instance? VirtualMachineError t) (not (instance? StackOverflowError t))))
 
 
-(def ^:private ref-chars
-  "Crockford's base 32: digits and letters, without the I, L, O and U that read
-  as other characters."
-  "0123456789ABCDEFGHJKMNPQRSTVWXYZ")
-
-
-(defn- reference
-  "A failure's reference: 40 random bits, as `4KF7-Q2XM`, short enough to read
-  out."
-  []
-  (let [r  (ThreadLocalRandom/current)
-        sb (StringBuilder. 9)]
-    (dotimes [i 8]
-      (when (= i 4)
-        (StringBuilder/.append sb \-))
-      (StringBuilder/.append sb (String/.charAt ref-chars (ThreadLocalRandom/.nextInt r 32))))
-    (str sb)))
-
-
 (defn- error-template
-  "Logs the failure of island `id`, placed by `call`, whose render threw `t`, and
-  returns the template of its error view: the island's own, else the app's,
-  else the default. One that throws gives way to the next."
-  [rt id call t]
+  "The template of the error view of island `id`, placed by `call`, whose render
+  threw `t`, logged under `run` (`failure/failed!`): the island's own view, else
+  the app's, else the default. One that throws gives way to the next, with its
+  failures logged independently under the same reference."
+  [rt id call t ^Failure run]
   (let [{island-name :name, :keys [error-view]} (model/call-island call)
-        failure {:ref        (reference)
+        failure {:ref        (.-reference run)
                  :error      t
                  :island     island-name
                  :path       id
                  :element-id (model/element-id id)
                  :args       (model/call-args call)
                  :session    (:ctx rt)}]
-    (log/error t (str "Island " id " (" island-name ", element " (:element-id failure) ") failed to render. "
-                   "Reference " (:ref failure) "."))
     (when-some [on-failure (:on-failure rt)]
       (on-failure failure))
     (loop [[view & more] (distinct (remove nil? [error-view (:error-view rt) island/error-view]))]
       (if-not more
         (frame/compile-island id (view failure))
         (or (try
-              (frame/compile-island id (view failure))
+              (let [compiled (frame/compile-island id (view failure))]
+                (Failure/.viewRendered run view)
+                compiled)
               (catch Throwable t2
                 (when (fatal? t2) (throw t2))
-                (log/error t2 (str "The error view of island " id " failed to render. Reference " (:ref failure) "."))
+                (failure/view-failed! run view t2)
                 nil))
           (recur more))))))
 
@@ -251,25 +233,32 @@
   "Renders `call` with hooks bound and settles what the render held and read
   against the previous render of `inst`, updating it in place. A render
   that throws renders the error view instead, keeping only what it held and read
-  before throwing, unless what it threw is `fatal?`."
+  before throwing, unless what it threw is `fatal?`. Failing the same way as
+  the last render keeps its reference (`failure/failed!`)."
   [rt ^Instance inst call]
   (let [id        (.-id inst)
         !holds    (volatile! {})
         ;; The swap after a render, or abandonment, already cleared this buffer.
         reads     (.-nextReads inst)
         !signals  (volatile! nil)
+        old-failure (.-failure inst)
         old-holds (.-holds inst)
         hooks     (render-hooks rt inst !holds reads !signals)
         [template calls] (binding [island/*render* hooks]
                            (try
-                             (let [node (apply (model/call-render call) (model/call-args call))]
-                               (frame/compile-island id node
-                                 (when-some [signals @!signals]
-                                   {:data-signals__ifmissing (signals-js signals)})))
+                             (let [node (apply (model/call-render call) (model/call-args call))
+                                   compiled (frame/compile-island id node
+                                              (when-some [signals @!signals]
+                                                {:data-signals__ifmissing (signals-js signals)}))]
+                               (set! (.-failure inst) nil)
+                               compiled)
                              (catch Throwable t
                                (try
                                  (when (fatal? t) (throw t))
-                                 (error-template rt id call t)
+                                 (let [run (failure/failed! (.-failure inst) t (model/call-island call) id
+                                             (model/element-id id))]
+                                   (set! (.-failure inst) run)
+                                   (error-template rt id call t run))
                                  (catch Throwable escaped
                                    (abandon-render! rt inst @!holds reads)
                                    (throw escaped))))))
@@ -296,6 +285,8 @@
     (set! (.-childIds inst) child-ids)
     (set! (.-kept inst) kept?)
     (set! (.-renders inst) (inc (.-renders inst)))
+    (when (and old-failure (nil? (.-failure inst)))
+      (failure/ended! old-failure "rendered again"))
     inst))
 
 
@@ -303,6 +294,9 @@
   [rt ^Instance inst]
   (run! #(release-quietly! (.-id inst) (val %)) (.-holds inst))
   (remove-reads! rt (.-id inst) (.-reads inst) nil)
+  (when-some [run (.-failure inst)]
+    (failure/ended! run "was unmounted")
+    (set! (.-failure inst) nil))
   (set! (.-holds inst) {})
   (ReadBuffer/.clear (.-reads inst))
   (ReadBuffer/.clear (.-nextReads inst)))

@@ -38,8 +38,8 @@
 
 (defn ^:no-doc call-island
   "What the island's definition says of it, the same for every call:
-  `{:name sym, :error-view f}`, its qualified name and its own error view, if
-  it has one."
+  `{:name sym, :error-view f, :traces cache}`, its qualified name, its own error
+  view if it has one, and the recent traces shared by its instances."
   [^Call call]
   (.-island call))
 

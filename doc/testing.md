@@ -21,9 +21,14 @@ or browser:
   handler gets string keys. With `:request` in the harness's options, `use-session` has it as the request that
   created the session, and the handler's `action/request` returns it.
 - **`failures`** lists the renders that threw, which the page would show only as an error view: each the failure the
-  view got, with the island's id under `:path` and the exception under `:error`, whichever view rendered it.
+  view got, with the island's id under `:path` and the exception under `:error`, whichever view rendered it. An
+  island failing again the same way repeats its `:ref`.
 - **Closing the harness** unmounts its islands: their resources start to linger and their action tokens are revoked.
 - **Renders run in the caller's scope.** Bind with `scoping` what the route's middleware would bind for a session.
 - **Sources are the app's.** An island reading through the app's own function over `observe` reads what that function
   opens, so a test that shouldn't reach a database redefines the function, with `with-redefs`, to one over a source of
   the test's own.
+
+Trace deduplication is shared by harnesses using the same island definition. If it fails the same way in several tests
+within a minute, later log lines may name an earlier reference instead of including the exception. Assert on
+`test/failures` for each render's exception.

@@ -36,7 +36,8 @@
     [s-exp.oda :as json])
   (:import
     [co.multiply.tropical.frame Slot]
-    [co.multiply.tropical.internal.model Call]))
+    [co.multiply.tropical.internal.model Call]
+    [co.multiply.tropical.runtime TraceCache]))
 
 
 ;; The render in progress: the runtime's hook implementations for this island.
@@ -72,7 +73,7 @@
   digits, `-` and `_`, so that it can't run into the `.` and `/` of ids."
   [island-name {:keys [key error-view]} render]
   (let [slot-name (name island-name)
-        island    {:name (symbol island-name) :error-view error-view}]
+        island    {:name (symbol island-name) :error-view error-view :traces (TraceCache.)}]
     (when-not (re-matches #"[A-Za-z][A-Za-z0-9_-]*" slot-name)
       (throw (IllegalArgumentException.
                (str "Island name " (pr-str slot-name) ": use a letter followed by letters, digits, - and _."))))
@@ -281,8 +282,10 @@
 
   An error view is a fn of the failure, a map:
 
-  - `:ref`        a reference made for this failure, such as `4KF7-Q2XM`, also
-                  in the line logging it: something for the user to report.
+  - `:ref`        the failure's reference, such as `4KF7-Q2XM`, also in the
+                  lines logging it: something for the user to report. An
+                  island failing again the same way, the same exception class
+                  thrown from the same place, keeps it until it renders successfully.
   - `:error`      the exception.
   - `:island`     the island's qualified name, as `app.page/rating-card`.
   - `:path`       the island's id, the path of slots from the root.

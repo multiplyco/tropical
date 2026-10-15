@@ -48,7 +48,9 @@ The Java `runtime.Instance` and `runtime.ReadBuffer` hold mutable bookkeeping fo
 immutable; only instance fields and read records are reused between renders. Restart the development JVM after
 changing these Java classes, just as for the signal and stream primitives.
 `internal.delivery` prepares and writes HTML patches, while `session` owns the pump, the flush and its checkpoint.
-`internal.signal-patch` composes pending signal patches without changing their meaning.
+`internal.signal-patch` composes pending signal patches without changing their meaning. Java `runtime.Failure` owns
+an instance's failure reference and counters; `runtime.TraceCache` belongs to the island definition and shares recent
+traces across instances. `internal.failure` logs their decisions through tools.logging.
 
 The cookie and storage persistence programs are `.js` resources under `resources/co/multiply/tropical`, embedded in
 the page's attributes by `internal.browser-code`. They receive configuration as arguments and run synchronously,

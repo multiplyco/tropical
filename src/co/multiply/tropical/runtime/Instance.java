@@ -28,6 +28,8 @@ public final class Instance {
     public boolean kept;
     public boolean pending;
     public long renders;
+    /** The run of failures the island is in, or null after a successful render. */
+    public Failure failure;
 
     public Instance(String id, String parent) {
         this.id = id;

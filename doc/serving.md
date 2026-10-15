@@ -165,6 +165,13 @@ logged through `clojure.tools.logging`, with the exception and a reference made 
 default view says only that the island failed, with the reference, for the user to report: what it renders reaches the
 client, and an exception's message can carry what the user shouldn't see.
 
+An island failing again the same way, the same exception class thrown from the same place, keeps its reference until
+it renders successfully or unmounts, however often it re-renders meanwhile, and its log lines share the reference.
+Repeats are logged without the stack trace, at doubling counts, and the end of the run with its count. A small
+cache per island definition shares recent stack traces across its instances for up to a minute; other runs' lines
+name the reference whose line has the trace. Each new run still gets a line. Error-view failures are tracked
+independently under the same reference, so suppressing a render's repeat cannot hide a new error in its view.
+
 The app's `:error-view`, `(fn [failure] hiccup)`, replaces the default, and an island's own, in `defisland`'s options,
 replaces the app's for that island:
 
