@@ -4,7 +4,7 @@
   (:require
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing]]
-    [co.multiply.quiescent :as q :refer [qdo]]
+    [co.multiply.quiescent :as q]
     [co.multiply.tropical.sse :as sse])
   (:import
     [co.multiply.tropical.sse EventStream]
@@ -113,13 +113,29 @@
 
 (deftest await-returns-once-closed
   (testing "closed by another thread"
-    (let [[s] (open-stream)]
-      (qdo (q/sleep 50) (sse/close! s))
-      (EventStream/.await s)
-      (is (not (EventStream/.isOpen s)))))
+    (let [[s] (open-stream)
+          started (promise)
+          t (q/task
+              (deliver started true)
+              (EventStream/.await s))]
+      (try
+        (is (true? (deref started 1000 :timeout)))
+        (sse/close! s)
+        (is (nil? (deref t 1000 :timeout)))
+        (is (not (EventStream/.isOpen s)))
+        (finally (sse/close! s)))))
   (testing "interrupted, it closes the stream"
     (let [[s] (open-stream)
-          t (q/task (EventStream/.await s))]
-      (Thread/sleep 50)
-      (is (true? (deref (q/cancel t) 1000 :timeout)))
-      (is (not (EventStream/.isOpen s))))))
+          started (promise)
+          returned (promise)
+          t (q/task
+              (deliver started true)
+              (EventStream/.await s)
+              (deliver returned (Thread/.isInterrupted (Thread/currentThread))))]
+      (try
+        (is (true? (deref started 1000 :timeout)))
+        (is (true? (deref (q/cancel t) 1000 :timeout)))
+        ;; Cancellation can settle before the interrupted thread returns.
+        (is (true? (deref returned 1000 :timeout)) "await returned with the interrupt status restored")
+        (is (not (EventStream/.isOpen s)))
+        (finally (sse/close! s))))))
