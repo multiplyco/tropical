@@ -54,6 +54,11 @@
   [:section child])
 
 
+(island/defisland many-reads
+  [sources]
+  [:p (reduce (fn [total source] (+ total (island/use-watch source))) 0 sources)])
+
+
 (def workloads
   {"sparse-10"     {:width 10}
    "sparse-100"    {:width 100}
@@ -63,6 +68,7 @@
    "fanout-100"    {:width 100 :mode :fanout}
    "fanout-1000"   {:width 1000 :mode :fanout}
    "filtered-1000" {:width 1000 :mode :filtered}
+   "reads-128"     {:width 128 :mode :many-reads}
    "churn-1000"    {:width 1000 :mode :churn}})
 
 
@@ -79,7 +85,10 @@
         inbox    (Inbox.)
         changed  (ArrayList.)
         rt       (runtime/runtime {:tab "profile" :uid "profile"} inbox)
-        root     (nth (iterate branch (rows sources size select)) depth)
+        root     (nth (iterate branch (if (= mode :many-reads)
+                                        (many-reads (subvec sources 0 width))
+                                        (rows sources size select)))
+                   depth)
         conn     (EventStream. (OutputStream/nullOutputStream))
         !before  (volatile! (runtime/frame! rt root []))
         !last    (volatile! nil)

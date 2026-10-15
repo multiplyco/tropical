@@ -36,6 +36,12 @@ and coalescing come from the runtime and the session pump instead, and are cover
 
 ## Rendering
 
+- **Mutable ownership, immutable frames.** Each session's pump owns its island instances, so their render function,
+  arguments, holds and counters can be updated in place without new synchronization. The Java `Instance` makes
+  those fields direct, while `ReadBuffer` reuses read records. The committed reads stay separate from the current
+  render's reads until ownership is reconciled; a render that escapes discards only its new acquisitions. Cleared
+  buffers release references to sources, selectors and values, and drop excess capacity after a large contraction.
+  Frames and templates stay immutable, since the session may still need an older frame for delivery or resync.
 - **Hooks keyed, not ordered.** Each hook names what it holds, so conditionals and loops around hooks are safe, unlike
   React's call order.
 - **Ids scoped by parent.** A page-wide uniqueness rule can't be checked locally, since two parents rendered in

@@ -29,7 +29,7 @@ clj -M -i dev/bench/profile.clj -e '(bench.profile/-main "summarize" "target/per
 ```
 
 Pass a workload name after `"measure"` to run just that case. `bench.profile/workloads` lists the sparse, broad,
-filtered, deep-tree and list-change cases. Results and recordings go under `target/perf`, outside Git. Timing runs
+filtered, deep-tree, many-read and list-change cases. Results and recordings go under `target/perf`, outside Git. Timing runs
 have JFR off; the recordings sample a warmed workload for ten seconds. The summary selects the main thread, as
 used by these commands. These measure publishing through patch writing to a null stream, excluding the pump's
 pacing, HTTP, compression and browser work. The older `bench.signal`, `bench.frame` and `bench.sse` benchmarks run
@@ -43,6 +43,9 @@ restart. The JVM also serves [Remontoire](https://github.com/multiplyco/remontoi
 ![The demo page](demo.png)
 
 Frame data and serialization live in `internal.model`; compilation and patch planning in `internal.frame`.
+The Java `runtime.Instance` and `runtime.ReadBuffer` hold mutable bookkeeping for the session's pump. Frames remain
+immutable; only instance fields and read records are reused between renders. Restart the development JVM after
+changing these Java classes, just as for the signal and stream primitives.
 `internal.delivery` prepares and writes HTML patches, while `session` owns the pump, the flush and its checkpoint.
 `internal.signal-patch` composes pending signal patches without changing their meaning.
 

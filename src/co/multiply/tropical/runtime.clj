@@ -22,23 +22,16 @@
     [co.multiply.tropical.resource :as resource])
   (:import
     [co.multiply.tropical.island Js]
+    [co.multiply.tropical.runtime Instance ReadBuffer ReadBuffer$Read]
     [co.multiply.tropical.signal Inbox Sub]
     [java.util Collection HashSet Iterator Set]
     [java.util.concurrent ThreadLocalRandom]))
 
 
-;; Instance: what the runtime keeps per mounted island, keyed by its id.
-;;   :id        its element id; :parent its parent's, nil for the root
-;;   :render    the render fn, :args its last arguments
-;;   :template  the last template; :frame the last frame
-;;   :calls     the child islands it placed, as Calls, in document order
-;;   :child-ids their element ids, in the same order
-;;   :kept?     whether its last render placed the same children, in the same order, as the one before
-;;   :holds     hold key -> {:value v, :release f}
-;;   :reads     [{:sub s, :select f, :seen v}], or :failed? true when selection threw
-;;   :pending?  whether the last render read a resource still waiting on its first value
-;;   :!state    the atom behind `use-state`
-;;   :renders   how many times it rendered
+;; Instance holds one island's mutable bookkeeping, owned by the session pump.
+;; Its committed reads and the next render's reads have separate reusable buffers:
+;; an escaped render discards only its own acquisitions. Instances never appear in
+;; frames, whose templates and child maps stay immutable for delivery and resyncs.
 
 
 (defn ^:no-doc runtime
@@ -101,9 +94,13 @@
       (set! (.-readers sub) ids))))
 
 
-(defn- read-subs
-  [reads]
-  (into #{} (map :sub) reads))
+(defn- remove-reads!
+  "Unregisters reads in `before` that aren't in `after`, once per subscription."
+  [rt id ^ReadBuffer before ^ReadBuffer after]
+  (dotimes [i (ReadBuffer/.subscriptionCount before)]
+    (let [sub (ReadBuffer/.subscriptionAt before i)]
+      (when (or (nil? after) (not (ReadBuffer/.contains after sub)))
+        (remove-reader! rt sub id)))))
 
 
 (defn- fatal?
@@ -194,23 +191,24 @@
 (defn- read!
   "Subscribes before reading, recording the read even if deref or selection
   throws. A failed read stays owned and retries on the next invalidation."
-  [rt id !reads source select]
+  [rt id ^ReadBuffer reads source select]
   (let [sub (add-reader! rt source id)]
     (try
       (let [v (select @sub)]
-        (vswap! !reads conj {:sub sub :select select :seen v})
+        (ReadBuffer/.add reads sub select v false)
         v)
       (catch Throwable t
-        (vswap! !reads conj {:sub sub :select select :failed? true})
+        (ReadBuffer/.add reads sub select nil true)
         (throw t)))))
 
 
 (defn- render-hooks
   "The hooks of one render, recording what it holds, reads and declares."
-  [rt {:keys [id] :as inst} !holds !reads !signals]
-  (let [old-holds (:holds inst)]
+  [rt ^Instance inst !holds reads !signals]
+  (let [id (.-id inst)
+        old-holds (.-holds inst)]
     {:session  (:ctx rt)
-     :state    (:!state inst)
+     :state    (.-state inst)
      :hold!    (fn [k acquire idempotent]
                  (if-some [held (get @!holds k)]
                    (if idempotent
@@ -222,7 +220,7 @@
                      (:value held))))
      ;; Subscribe before reading, so no change between the two is missed.
      :read!    (fn [source select]
-                 (read! rt id !reads source select))
+                 (read! rt id reads source select))
      :declare! (fn [path value]
                  (vswap! !signals assoc-in path value)
                  nil)
@@ -230,7 +228,7 @@
                  (when-not (map? signals)
                    (throw (IllegalArgumentException.
                             (str "Signals to patch are a map, not " (pr-str signals) "."))))
-                 (Inbox/.post (:inbox rt) [:signals id (:!state inst) signals])
+                 (Inbox/.post (:inbox rt) [:signals id (.-state inst) signals])
                  nil)
      :script!  (fn [url]
                  (let [!scripts (:!scripts rt)]
@@ -242,22 +240,26 @@
 (defn- abandon-render!
   "Releases acquisitions not owned by the previous instance when rendering
   escapes its error boundary. The previous instance is still owned by rt."
-  [rt {:keys [id holds reads]} acquired read]
-  (run! (fn [[k held]] (when-not (contains? holds k) (release-quietly! id held))) acquired)
-  (run! #(remove-reader! rt % id) (remove (read-subs reads) (read-subs read))))
+  [rt ^Instance inst acquired ^ReadBuffer read]
+  (try
+    (run! (fn [[k held]] (when-not (contains? (.-holds inst) k) (release-quietly! (.-id inst) held))) acquired)
+    (remove-reads! rt (.-id inst) read (.-reads inst))
+    (finally (ReadBuffer/.clear read))))
 
 
 (defn- render-island
   "Renders `call` with hooks bound and settles what the render held and read
-  against the previous render of `inst`. Returns the updated instance. A render
+  against the previous render of `inst`, updating it in place. A render
   that throws renders the error view instead, keeping only what it held and read
   before throwing, unless what it threw is `fatal?`."
-  [rt {:keys [id] :as inst} call]
-  (let [!holds    (volatile! {})
-        !reads    (volatile! [])
+  [rt ^Instance inst call]
+  (let [id        (.-id inst)
+        !holds    (volatile! {})
+        ;; The swap after a render, or abandonment, already cleared this buffer.
+        reads     (.-nextReads inst)
         !signals  (volatile! nil)
-        old-holds (:holds inst)
-        hooks     (render-hooks rt inst !holds !reads !signals)
+        old-holds (.-holds inst)
+        hooks     (render-hooks rt inst !holds reads !signals)
         [template calls] (binding [island/*render* hooks]
                            (try
                              (let [node (apply (model/call-render call) (model/call-args call))]
@@ -269,54 +271,58 @@
                                  (when (fatal? t) (throw t))
                                  (error-template rt id call t)
                                  (catch Throwable escaped
-                                   (abandon-render! rt inst @!holds @!reads)
+                                   (abandon-render! rt inst @!holds reads)
                                    (throw escaped))))))
         holds     @!holds
-        reads     @!reads
-        kept?     (same-slots? (:calls inst) calls)]
+        kept?     (same-slots? (.-calls inst) calls)
+        child-ids (if kept?
+                    (.-childIds inst)
+                    (let [slots (:slots (.-frame inst))]
+                      (mapv (fn [call]
+                              (let [slot (model/call-slot call)]
+                                (or (:id (get slots slot)) (model/child-id id slot))))
+                        calls)))]
     (run! (fn [[k held]] (when-not (contains? holds k) (release-quietly! id held))) old-holds)
-    (run! #(remove-reader! rt % id) (remove (read-subs reads) (read-subs (:reads inst))))
-    (assoc inst
-      :render (model/call-render call)
-      :args (model/call-args call)
-      :holds holds
-      :reads reads
-      :pending? (boolean (some #(identical? resource/pending (:seen %)) reads))
-      ;; Equal output keeps the old template, so nothing is patched.
-      :template (if (= (:parts template) (:parts (:template inst))) (:template inst) template)
-      :calls calls
-      :child-ids (if kept?
-                   (:child-ids inst)
-                   (let [slots (:slots (:frame inst))]
-                     (mapv (fn [call]
-                             (let [slot (model/call-slot call)]
-                               (or (:id (get slots slot)) (model/child-id id slot))))
-                       calls)))
-      :kept? kept?
-      :renders (inc (:renders inst 0)))))
+    (remove-reads! rt id (.-reads inst) reads)
+    (set! (.-render inst) (model/call-render call))
+    (set! (.-args inst) (model/call-args call))
+    (set! (.-holds inst) holds)
+    (set! (.-pending inst) (ReadBuffer/.hasPending reads resource/pending))
+    (Instance/.commitReads inst)
+    ;; Equal output keeps the old template, so nothing is patched.
+    (when-not (= (:parts template) (:parts (.-template inst)))
+      (set! (.-template inst) template))
+    (set! (.-calls inst) calls)
+    (set! (.-childIds inst) child-ids)
+    (set! (.-kept inst) kept?)
+    (set! (.-renders inst) (inc (.-renders inst)))
+    inst))
 
 
 (defn- unmount!
-  [rt {:keys [id holds reads]}]
-  (run! #(release-quietly! id (val %)) holds)
-  (run! #(remove-reader! rt % id) (read-subs reads)))
+  [rt ^Instance inst]
+  (run! #(release-quietly! (.-id inst) (val %)) (.-holds inst))
+  (remove-reads! rt (.-id inst) (.-reads inst) nil)
+  (set! (.-holds inst) {})
+  (ReadBuffer/.clear (.-reads inst))
+  (ReadBuffer/.clear (.-nextReads inst)))
 
 
 (defn- unmount-tree!
   "Unmounts island `id` and the islands it placed."
   [rt id]
-  (when-let [inst (get @(:!instances rt) id)]
+  (when-let [^Instance inst (get @(:!instances rt) id)]
     (vswap! (:!instances rt) dissoc id)
-    (run! #(unmount-tree! rt %) (:child-ids inst))
+    (run! #(unmount-tree! rt %) (.-childIds inst))
     (unmount! rt inst)))
 
 
 (defn- changed?
   "Whether `call` differs from what `inst` last rendered."
-  [inst call]
+  [^Instance inst call]
   (or (nil? inst)
-    (not (identical? (:render inst) (model/call-render call)))
-    (not= (:args inst) (model/call-args call))))
+    (not (identical? (.-render inst) (model/call-render call)))
+    (not= (.-args inst) (model/call-args call))))
 
 
 (defn- reconcile
@@ -325,22 +331,23 @@
   rendered or is an ancestor of an island that must (`on-path`). Otherwise its
   last frame stands."
   [rt id call parent dirty on-path]
-  (let [inst (get @(:!instances rt) id)]
+  (let [^Instance inst (get @(:!instances rt) id)]
     (if (and inst (not (changed? inst call)) (not (contains? on-path id)))
-      (:frame inst)
-      (let [render? (or (changed? inst call) (contains? dirty id))
-            before  (:child-ids inst)
-            before-calls (:calls inst)
-            inst    (or inst {:id id :parent parent :!state (atom {})})
-            inst    (if render? (render-island rt inst call) inst)
-            ;; Rendering has already acquired and released holds. Record their
-            ;; current owner before a child can abort this frame: disposal must
-            ;; release the new holds, never the ones just released.
-            _       (when render? (vswap! (:!instances rt) assoc id inst))
-            old     (:frame inst)
-            kept?   (and old (or (not render?) (:kept? inst)))
-            calls   (:calls inst)
-            ids     (:child-ids inst)
+      (.-frame inst)
+      (let [fresh?  (nil? inst)
+            render? (or (changed? inst call) (contains? dirty id))
+            before  (when inst (.-childIds inst))
+            before-calls (when inst (.-calls inst))
+            ^Instance inst (or inst (Instance. id parent))
+            _       (when render? (render-island rt inst call))
+            ;; Existing instances already own the render's committed holds and
+            ;; reads. Install a new instance before a child can abort the frame,
+            ;; so disposal sees current ownership even without a finished frame.
+            _       (when fresh? (vswap! (:!instances rt) assoc id inst))
+            old     (.-frame inst)
+            kept?   (and old (or (not render?) (.-kept inst)))
+            calls   (.-calls inst)
+            ids     (.-childIds inst)
             n       (count calls)
             ;; Keep surviving child frames and their map, even across inserts,
             ;; removals and reorders. The template records their document order.
@@ -376,19 +383,19 @@
                                         slots before))
                                     slots)]
                         (persistent! slots)))
-            frame   (if (and old (identical? (:template old) (:template inst)) (identical? slots (:slots old)))
+            frame   (if (and old (identical? (:template old) (.-template inst)) (identical? slots (:slots old)))
                       old
-                      (model/->Frame id (:template inst) slots))]
-        (vswap! (:!instances rt) assoc id (assoc inst :frame frame))
+                      (model/->Frame id (.-template inst) slots))]
+        (set! (.-frame inst) frame)
         frame))))
 
 
 (defn- stale?
   "Whether a read's selected value differs from what the render saw."
-  [{:keys [sub select seen failed?]}]
-  (or failed?
+  [^ReadBuffer$Read read]
+  (or (.-failed read)
     (try
-      (not= (select @sub) seen)
+      (not= ((.-select read) @(.-sub read)) (.-seen read))
       (catch Throwable t
         (when (fatal? t) (throw t))
         true))))
@@ -396,11 +403,11 @@
 
 (defn- stale-read?
   "Whether any of `reads` from `sub` would now select a different value."
-  [reads sub]
+  [^ReadBuffer reads sub]
   (loop [i 0]
-    (when (< i (count reads))
-      (let [read (nth reads i)]
-        (if (and (identical? sub (:sub read)) (stale? read))
+    (when (< i (ReadBuffer/.size reads))
+      (let [read (ReadBuffer/.get reads i)]
+        (if (and (identical? sub (.-sub read)) (stale? read))
           true
           (recur (inc i)))))))
 
@@ -419,7 +426,7 @@
                     (loop [dirty dirty]
                       (if (Iterator/.hasNext it)
                         (let [id (Iterator/.next it)]
-                          (recur (if (stale-read? (:reads (get instances id)) sub)
+                          (recur (if (stale-read? (.-reads ^Instance (get instances id)) sub)
                                    (conj! dirty id)
                                    dirty)))
                         dirty)))
@@ -434,7 +441,7 @@
       (if-let [[id & more] todo]
         (if (contains? acc id)
           (recur more acc)
-          (recur (if-some [parent (:parent (get instances id))] (cons parent more) more)
+          (recur (if-some [parent (some-> ^Instance (get instances id) .-parent)] (cons parent more) more)
             (conj! acc id)))
         (persistent! acc)))))
 
@@ -472,7 +479,7 @@
   "Whether a mounted island's last render read a resource still waiting on its
   first value (`hooks/pending`)."
   [rt]
-  (boolean (some :pending? (vals @(:!instances rt)))))
+  (boolean (some (fn [^Instance inst] (.-pending inst)) (vals @(:!instances rt)))))
 
 
 (defn ^:no-doc scripts
@@ -485,7 +492,7 @@
 (defn render-counts
   "Island id -> how many times it rendered, over the mounted islands."
   [rt]
-  (into (sorted-map) (map (fn [[id inst]] [id (:renders inst)])) @(:!instances rt)))
+  (into (sorted-map) (map (fn [[id ^Instance inst]] [id (.-renders inst)])) @(:!instances rt)))
 
 
 (defn ^:no-doc mounted
@@ -497,11 +504,12 @@
 (defn ^:no-doc held
   "What the mounted island `id` holds under `k` (`island/use-hold`), or nil."
   [rt id k]
-  (get-in @(:!instances rt) [id :holds k :value]))
+  (when-some [^Instance inst (get @(:!instances rt) id)]
+    (get-in (.-holds inst) [k :value])))
 
 
 (defn ^:no-doc mounted-as?
   "Whether the island `id` is mounted, as the instance whose state is
   `!state`: not one mounted again under its id since."
   [rt id !state]
-  (identical? !state (:!state (get @(:!instances rt) id))))
+  (identical? !state (some-> ^Instance (get @(:!instances rt) id) .-state)))

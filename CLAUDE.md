@@ -8,7 +8,7 @@ demo uses only the library's public API. What the demo needs from a session goes
 `:uid`, `:page`, `:patch-signals`, `:error-view`, `:first-frame-ms`), not through demo-specific code in the library.
 Tests are of the library, and don't use the demo either.
 
-The Java sources (`co.multiply.tropical.signal`, `co.multiply.tropical.sse`, `co.multiply.tropical.frame`) sit next to
+The Java sources (`co.multiply.tropical.signal`, `.sse`, `.frame`, `.runtime`) sit next to
 the Clojure ones in `src` and compile into `target/classes`, which is on `:paths`. After changing one, run
 `bb compile:java` and restart the JVM; `bb dev` and `bb test` compile first. The jar ships the classes, not the `.java`
 files.

@@ -125,6 +125,53 @@
     (is (empty? (ARef/.getWatches items)))))
 
 
+(deftest changing-many-reads-keeps-every-selection-and-drops-unused-sources
+  (let [sources (mapv (fn [_] (atom {:a 0 :b 0})) (range 24))
+        chosen (atom [])
+        reader (island/island-fn "reader" nil
+                 (fn []
+                   (into [:p]
+                     (map (fn [i]
+                            (let [source (nth sources i)]
+                              [:span (island/use-watch source :a) "/" (island/use-watch source :b)])))
+                     (island/use-watch chosen))))
+        {:keys [step rt]} (harness reader)]
+    (try
+      (step)
+      (doseq [selection [(vec (range 20)) [5] (vec (reverse (range 20))) [] [23 5]]]
+        (reset! chosen selection)
+        (step)
+        (let [selected (set selection)]
+          (doseq [i (range (count sources))]
+            (is (= (contains? selected i) (boolean (seq (ARef/.getWatches (nth sources i)))))
+              "only the current render's sources stay watched")))
+        (when-some [i (last selection)]
+          (let [renders (get (runtime/render-counts rt) "reader")]
+            (swap! (nth sources i) update :b inc)
+            (step)
+            (is (= (inc renders) (get (runtime/render-counts rt) "reader"))
+              "a second selection of the same source still invalidates, after growing or shrinking the reads"))))
+      (finally (runtime/dispose! rt)))
+    (is (every? #(empty? (ARef/.getWatches %)) sources))
+    (is (empty? (ARef/.getWatches chosen)))))
+
+
+(deftest an-invalid-selector-is-still-an-owned-read
+  (let [source (atom 0)
+        failures (atom 0)
+        reader (island/island-fn "reader" nil (fn [] [:p (island/use-watch source 42)]))
+        {:keys [step rt]} (harness reader {:tab "tab" :uid "user"}
+                            {:on-failure (fn [_] (swap! failures inc))})]
+    (try
+      (step)
+      (is (seq (ARef/.getWatches source)))
+      (reset! source 1)
+      (step)
+      (is (= 2 @failures) "even an invalid selector stays recorded and retries")
+      (finally (runtime/dispose! rt)))
+    (is (empty? (ARef/.getWatches source)))))
+
+
 (deftest an-aborted-render-releases-its-new-acquisitions
   (let [source (atom 1)
         released (atom 0)
