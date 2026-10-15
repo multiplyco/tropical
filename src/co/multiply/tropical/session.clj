@@ -663,8 +663,9 @@
   in place.
 
   Call it once the reloaded code serves requests: a tab that reconnects before
-  that gets a session of the old code. What only a page load renders, such as
-  the page's head or an edited script, shows once the page is reloaded."
+  that gets a session of the old code. A tab whose page loaded what has
+  changed since, such as an edited script, or a head the app's `:revision`
+  names anew, reloads instead (`ring/handler`)."
   []
   (run! close! (vals @!sessions)))
 

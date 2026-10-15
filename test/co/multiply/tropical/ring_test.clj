@@ -6,9 +6,11 @@
     [co.multiply.quiescent :as q]
     [co.multiply.scoped :refer [ask scoping]]
     [co.multiply.tropical.action :as action :refer [use-action]]
+    [co.multiply.tropical.cookie :as cookie]
     [co.multiply.tropical.island :as island :refer [defisland]]
     [co.multiply.tropical.ring :as ring]
     [co.multiply.tropical.runtime :as runtime]
+    [co.multiply.tropical.script :as script]
     [co.multiply.tropical.session :as session]
     [co.multiply.tropical.test-util :refer [capturing datastar-statement harness]]
     [dev.onionpancakes.chassis.core :as h]
@@ -366,8 +368,10 @@
 
 
 (defn- stream-request
+  "The stream request of `tab`, from a page of the server's revision."
   [uri uid tab]
-  (request :get uri uid (cond-> {"tropical-load" "x"} tab (assoc "tropical-tab" tab))))
+  (let [req (request :get uri uid (cond-> {"tropical-load" "x"} tab (assoc "tropical-tab" tab)))]
+    (assoc-in req [:headers "tropical-revision"] (ring/revision-of app req))))
 
 
 (defn- reloads?
@@ -440,6 +444,61 @@
     (is (= 204 (:status (refuse (from "/items/42" "load2" cookie))))
       "the page reloaded and answered, but its stream is refused: a 204 ends the client's retries")
     (is (reloads? (refuse (from "/items/43" "load2" cookie))) "another page")))
+
+
+(defn- attaches?
+  "Whether `resp` is a stream attached to a session."
+  [resp]
+  (and (= 200 (:status resp)) (not (string? (:body resp)))))
+
+
+(deftest a-page-of-another-revision-than-the-server's-reloads
+  (let [!named (atom "head-1")
+        h      (ring/handler (assoc app :revision (fn [_] @!named)))
+        page   (fn [] (:body (h (request :get "/page" "alice" {}))))
+        body   (page)
+        rev    (second (re-find #"'Tropical-Revision': '([0-9a-f]+)'" body))
+        stream (fn [tab revision & {:keys [load cookie]}]
+                 (h (request :get "/page" "alice"
+                      (cond-> {"tropical-tab" tab "tropical-load" (or load "x")}
+                        revision (assoc "tropical-revision" revision)
+                        cookie (assoc "cookie" cookie)))))
+        ;; A tab the server doesn't know: its answer, and whether it built a
+        ;; session for it.
+        fresh  (fn [revision & more]
+                 (let [tab   (str (random-uuid))
+                       resp  (apply stream tab revision more)
+                       held? (session/held? tab)]
+                   (some-> (get @session/!sessions tab) session/close!)
+                   [resp held?]))]
+    (is (some? rev) "the page's stream carries it")
+    (testing "a page of the server's revision"
+      (let [tab (second (re-find (re-pattern (str "Tropical-Tab.*?(" uuid ")")) body))]
+        (is (attaches? (stream tab rev)))
+        (session/close! (get @session/!sessions tab)))
+      (is (= rev (second (re-find #"'Tropical-Revision': '([0-9a-f]+)'" (page)))) "every page of it names it alike"))
+    (testing "reloads, with no session built"
+      (is (= [true false] (update (fresh nil) 0 reloads?)) "a page from before revisions")
+      (is (= [true false] (update (fresh "0123456789abcdef") 0 reloads?)) "another revision")
+      (reset! !named "head-2")
+      (is (reloads? (first (fresh rev))) "the app names what its page loads anew")
+      (reset! !named "head-1")
+      (is (attaches? (first (fresh rev))) "and as before")
+      (script/script* 'co.multiply.tropical.ring-test/revised {:js (str "// " (random-uuid))})
+      (is (reloads? (first (fresh rev))) "a script changed")
+      (let [rev (second (re-find #"'Tropical-Revision': '([0-9a-f]+)'" (page)))]
+        (cookie/state* 'co.multiply.tropical.ring-test/revised {:default (str (random-uuid))})
+        (is (reloads? (first (fresh rev))) "what tropical puts in the page changed, as with a cookie state declared")))
+    (testing "a page of another revision just after it reloaded for that is rebuilt in place, as servers that disagree"
+      (let [cookie  (guard-cookie (first (fresh "0123456789abcdef" :load "load1")))
+            !logged (atom [])]
+        (is (some? cookie))
+        (is (reloads? (first (fresh "0123456789abcdef" :load "load1" :cookie cookie)))
+          "the load told to reload, retrying before it unloads, is told again")
+        (binding [log/*logger-factory* (capturing !logged)]
+          (is (= [true true] (update (fresh "0123456789abcdef" :load "load2" :cookie cookie) 0 attaches?))))
+        (is (some (fn [[level]] (= :warn level)) @!logged) "and logged")))
+    (is (thrown? IllegalArgumentException (ring/handler (assoc app :revision "head-1"))) "a revision that isn't a fn")))
 
 
 (defn- eventually

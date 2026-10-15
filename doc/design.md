@@ -236,6 +236,29 @@ Atoms remain the user-facing state: `RefSignal` gives each atom one watch, howev
   stickiness that lasts as long as a tab doesn't need, and which is the better fix where it can be had.
   A stream ends at a random point in the last tenth of the period, so tabs that connected together, as after a
   deploy, don't reconnect together.
+- **A page that loaded what has changed reloads.** A rebuild patches the islands into the page the tab has, which
+  keeps what the browser holds, and is why a deploy needn't reload open tabs. What the page loaded outside its islands
+  isn't patched: the head the app rendered, such as the engine and the stylesheet; the scripts, whose components
+  `customElements.define` won't replace, and whose modules would run again beside the old ones; and tropical's own code
+  in the page. New markup on an old head fails quietly, as an unstyled class or a dead component. So a page carries a
+  revision, fixed as it renders, which its stream sends each time it connects, and a server of another revision
+  reloads the page before it builds a session. A header, not a signal: Datastar sends signals with every action too,
+  and they are the page's to change.
+  - Tropical's part is what it can see: its code in the page, rendered with fixed arguments, which follows the cookie
+    and storage states declared, and the version of every script. Every script, not the page's: those would have to
+    come from the browser, and Datastar sends a stream's headers as they were when it opened it on every retry, so a
+    script patched in later would be missing from the reconnect after a restart. Every script is coarse, as a deploy
+    that changes one reloads every tab, but sound: what a page loads after it renders comes from a server of its
+    revision, since a stream that reaches any other reloads it first. The browser could check each script tag the
+    stream appends against those it holds, which would be precise, but would reload while the user works, when an
+    island first needs the changed component, under a loop guard of its own.
+  - The app's part, `:revision`, names the head, which tropical can't see, nor digest from the page, where a nonce
+    differs per request. Revisions are compared, not ordered, so a server of the old one reloads a page of the new one
+    too: during a rolling deploy, the page then matches the server it reached. A page from before revisions sends
+    none, and reloads once.
+  - The reload sets the guard cookie a refused stream's does, and a page of another revision again, from a later
+    load within it, is rebuilt in place, with a warning, where a refusal gets a 204: servers that disagree on a
+    revision, as when it is a start time, would otherwise leave a page without its stream, worse than stale.
 - **A failed pump closes its stream.** A session whose own loop throws is closed with its stream, so the client
   reconnects into a new session, instead of staying attached to one that will never send.
 - **Sync Ring streams by holding the thread.** A sync server ends a response once its body is written, so a sync

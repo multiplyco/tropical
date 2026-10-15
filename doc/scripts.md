@@ -28,5 +28,6 @@ Some of a page has to run in the browser: an outline that follows the reader as 
   what a script put there. A web component draws into its shadow root, which the morph doesn't reach. One made with
   Datastar's Rocket loads this way too ([Components with Rocket](rocket.md)).
 - **A page keeps what it loaded.** An edited script gets a new URL, but `customElements.define` won't redefine a name,
-  so an edited component shows on the next page load. In development, a script whose resource is a file is read again
-  when the file changes.
+  and a module runs again beside the old one. So a page reloads when its stream connects to a server on which a script
+  has changed since the page loaded: after a deploy that changes one, or in development, after `session/close-all!`
+  ([Serving](serving.md)). In development, a script whose resource is a file is read again when the file changes.

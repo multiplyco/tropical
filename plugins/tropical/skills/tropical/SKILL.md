@@ -222,8 +222,8 @@ plain function returning hiccup, called inside islands.
 - **Islands own their DOM.** A render morphs an island's elements back to the server's, undoing what a script put
   there. Draw into a web component's shadow root, or keep the morph off an element with `data-ignore-morph`.
 - **Scripts** are ES modules declared with `defscript` and taken up with `(script/use s)` in the islands that need
-  them. The page loads each once, from the first frame that has it. An edited component shows after a page load,
-  since `customElements.define` won't redefine a name.
+  them. The page loads each once, from the first frame that has it. `customElements.define` won't redefine a name,
+  so a page reloads when its stream connects to a server on which a script has changed, as after a deploy.
 - **Rocket components** (Datastar's `rocket(...)`) are scripts like any other, and elements whose props the island
   renders as attributes and whose events it takes with `use-action`'s `{:value "evt.detail"}`. The page loads
   `datastar-rocket.js` in place of `datastar.js`, never both, and components import `rocket` from that copy: name it
@@ -297,6 +297,10 @@ plain function returning hiccup, called inside islands.
   counts it from when it first set the cookie, even setting it again on each response, lapses under a busy tab too. A
   script posting with `use-token` dispatches `tropical:reopen` on `window` when the answer has a `Tropical-Reopen`
   header.
+- **A deploy that changes the page's head.** A tab rebuilt after a deploy keeps the head its page loaded: the engine,
+  the stylesheet. Give the app `:revision`, `(fn [request] revision)`, naming what the head loads, such as a digest of
+  its fingerprinted URLs, and a page whose stream reaches a server that names another reloads. Tropical covers its own
+  code and every script itself. Name it alike on every server of a release: not a start time, nor anything random.
 
 ## Testing islands
 

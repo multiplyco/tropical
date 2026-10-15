@@ -68,7 +68,8 @@ And an island uses it:
   tag and the modules can't disagree on its URL. It goes before the first module, with the nonce.
 - **Loaded like any script.** `defscript` and `script/use` load the component's module: in the head with the first
   frame, or over the stream when an island using it is patched in, once per page. Rocket defines the element as the
-  module runs, so an edited component shows on the next page load, as with any `customElements.define`.
+  module runs, and won't define it again, as with any `customElements.define`: a page reloads when its stream
+  connects to a server on which the component has changed, as after a deploy ([Scripts](scripts.md)).
 - **Props are the island's.** The island renders them as attributes, a structured one as JSON, which `ui/json`
   writes. Rocket decodes them with the component's codecs, and renders again when a patch changes them. A prop the
   component sets itself is written back to its attribute, and the island's next render puts its own value back, or,

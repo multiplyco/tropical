@@ -43,7 +43,10 @@
     stays failed for the page, under any later tag.
   - A page keeps the version of a script it loaded first. A changed script
     loads under its new URL, but `customElements.define` won't redefine a
-    name, so a component changes on the next page load.
+    name, and a module runs again beside the old one. So a page reloads when
+    its stream connects to a server on which a script has changed since the
+    page loaded, as after a deploy, or `session/close-all!` in development
+    (`ring/handler`'s revision).
 
   In development, a script whose resource is a file is read again when the file
   changes, at most once a second, so a reload of the page picks up an edit."
@@ -174,6 +177,14 @@
   "The URL `script` is served at now."
   [script]
   (:url (current script)))
+
+
+(defn urls
+  "The URL every script is served at now, in order: the scripts a page could
+  load, part of the page's revision (`ring/handler`)."
+  {:no-doc true}
+  []
+  (sort (map url (vals @!scripts))))
 
 
 (defn lookup

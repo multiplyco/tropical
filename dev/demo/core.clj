@@ -54,6 +54,8 @@
   {:uid            request-uid
    :page           (fn [{:keys [request]}]
                      (page/shell (:csp-nonce request)))
+   ;; What the shell's head loads: a tab opened before it changed reloads.
+   :revision       page/revision
    :patch-signals  page/wire-stats
    :error-view     page/error-view
    ;; A cold page waits this long for its reads: alpha's feed, which connects in

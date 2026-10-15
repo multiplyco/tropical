@@ -17,6 +17,8 @@ them looks.
                             [:script {:type "module" :nonce nonce :src datastar-url}]
                             (ring/scripts nonce)]
                            (ring/mount :body {:class [:min-h-screen]})]])))
+   ;; What the page's head loads, so a tab opened before it changed reloads.
+   :revision       (fn [_] datastar-url)
    ;; Your authentication: the user a request is made on behalf of, or nil.
    :uid            current-user
    :error-view     (fn [{:keys [ref]}] [:div.error "This part of the page failed to load. Reference " ref "."])
@@ -43,6 +45,7 @@ The keys, with the details in the docstrings of `co.multiply.tropical.ring` and 
 |----------------------|------------------------------------------------------------------------------------------------|
 | `:root`              | `(fn [{:keys [tab uid request]}] call)`: the session's root island                             |
 | `:page`              | `(fn [{:keys [tab frame scripts request]}] html)`: the page, from the session's first frame   |
+| `:revision`          | `(fn [request] revision)`: names what the page's head loads; optional                          |
 | `:open-when-hidden`  | true keeps each tab's stream open while its page is hidden, for browser automation; optional  |
 | `:uid`               | `(fn [request] uid)`: the user, or nil                                                         |
 | `:error-view`        | `(fn [failure] hiccup)`: what renders in place of an island that throws; optional              |
@@ -231,6 +234,15 @@ until the response ends. The page and the actions are left to the server's compr
   what the first server held in memory: islands' `use-state`, shared state kept in memory, and whatever the app keeps
   per server. A rebuild recovers the tab, not that, which is why keeping a tab on one server matters more than
   recovering it.
+- **A page that loaded what has changed reloads.** A rebuild patches the islands into the page the tab has, and what
+  that page loaded outside them stays as it was: the head the app's `:page` rendered, such as the engine and the
+  stylesheet, the scripts its islands declared, and tropical's own code in the page. So a page carries a revision, which
+  its stream sends each time it connects, and a stream that reaches a server of another revision reloads the page,
+  building no session. A deploy that changes what pages load reloads each open tab once; one that doesn't rebuilds
+  them in place. Tropical's part covers its own code and every script. The head is the app's to name, with
+  `:revision`, such as a digest of the URLs it loads, fingerprinted as they should be; without it, a changed head
+  shows once a tab is reloaded by hand. Name it alike on every server of a release, so not by when the server started:
+  a page whose stream finds another revision again just after it reloaded is rebuilt in place, with a warning.
 - **Stickiness that lapses.** A tab whose stream stays open on one server makes no other request while it sits idle,
   so stickiness that lasts a fixed time, such as a cookie good for ten minutes, can lapse under it, and its next click
   goes elsewhere, which costs that click. Stickiness that lasts as long as a tab may stay open, hours, is the fix.
@@ -255,4 +267,4 @@ An open session goes on rendering with the code it started with, since a reload 
 tools.namespace's makes new vars. Make `session/close-all!` the last step of the app's reload, once the new code serves
 requests. Each tab reconnects about a second later into a fresh session, whose first frame updates the page in place,
 leaving its signals, scroll and form input as they are. A tab that reconnects before the new code serves gets a session
-of the old code. What only a page load renders, the page's head and edited scripts, shows once the page is reloaded.
+of the old code. A tab whose page loaded an edited script, or a head that `:revision` names anew, reloads instead.

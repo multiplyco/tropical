@@ -35,6 +35,15 @@
   An open stream isn't asked again: what a page shows going away while it is
   open is for its islands to render.
 
+  A tab rebuilt from its route, as after a restart or a deploy, is patched
+  into the page it has, which keeps what the browser holds. What the page
+  loaded outside its islands stays as it was: tropical's own code in it, the
+  scripts its islands declared, and what the app's `:page` put in its head,
+  such as the engine and the stylesheet. So a page has a revision, a digest of
+  them, which its stream sends each time it connects, and a stream for a page
+  of another revision than the server's reloads it. The head is the app's to
+  name, with `:revision`.
+
   The app the sessions run (`co.multiply.tropical.session`) takes more keys
   here, and its `:root` also gets the `:request` that created the session:
 
@@ -50,6 +59,12 @@
                          declared in its head with `scripts`. A page that opens
                          no stream for its tab, which could never update,
                          throws; one without `ui/page-attrs` is logged, once.
+  - `:revision`          optional: `(fn [request] revision)`, a string naming
+                         what the app's `:page` loads, such as a digest of
+                         the URLs in its head. A page whose stream connects
+                         to a server that names another reloads, and takes
+                         up what changed. Without it, a page's revision is
+                         tropical's part alone.
   - `:open-when-hidden`  optional: true keeps each tab's stream open while its
                          page is hidden, for browser automation in
                          development (see `stream-init`).
@@ -99,7 +114,9 @@
   (:import
     [co.multiply.tropical.sse EventStream]
     [java.io ByteArrayOutputStream InputStream IOException OutputStream]
-    [java.nio.charset StandardCharsets]))
+    [java.nio.charset StandardCharsets]
+    [java.security MessageDigest]
+    [java.util HexFormat]))
 
 
 (def max-signals-bytes
@@ -129,12 +146,36 @@
       nil)))
 
 
+(defn- init-js
+  "`stream-init`'s expression, its stream carrying the page's `revision`, if
+  known."
+  [tab revision open-when-hidden]
+  ;; One statement, as Datastar splits them. The page load's id is made once,
+  ;; so a stream opened again is this load's: one opened as another load
+  ;; would be taken for a copy of the page, and reloaded.
+  (str "(() => {let load = Math.random().toString(36).slice(2), stream, open = () => {"
+    "stream && stream.abort(); stream = new AbortController(); "
+    "@get(location.href, {headers: {'Tropical-Tab': '" tab "', 'Tropical-Load': load"
+    (when revision (str ", 'Tropical-Revision': '" revision "'")) "}, "
+    "retry: 'always', requestCancellation: stream" (when open-when-hidden ", openWhenHidden: true") "})}; "
+    "addEventListener('tropical:reopen', open); "
+    ;; Leaving a page hides it, where Datastar closes the stream, unless it
+    ;; is kept open; showing it again, as the back/forward cache restores it,
+    ;; reopens it. Kept open, the stream is cancelled as the page is left
+    ;; instead, and opened again, as the same page load, as it is restored.
+    (when open-when-hidden
+      "addEventListener('pagehide', () => stream.abort()); addEventListener('pageshow', (evt) => evt.persisted && open()); ")
+    "open()})()"))
+
+
 (defn stream-init
   "The Datastar expression that opens `tab`'s stream, for the page's `data-init`.
 
   The stream is requested from the page's own URL. It carries the tab, and an
   id for this page load, made in the browser, so the session can tell its own
-  page from a copy with the same tab id, such as a duplicated tab.
+  page from a copy with the same tab id, such as a duplicated tab. And it
+  carries the page's revision, so that a stream that connects to a server on
+  which what the page loaded has changed reloads it (see `handler`).
   `retry: 'always'` reconnects a stream the server ended too, not just one that
   failed: a closed session ends its connection so the client retries into a
   new one.
@@ -166,23 +207,11 @@
   ([tab {:keys [open-when-hidden] :as opts}]
    (when-some [unknown (seq (remove #{:open-when-hidden} (keys opts)))]
      (throw (ex-info (str "Unknown stream-init options: " (vec unknown)) {:options opts})))
-   (when (= tab (:tab (page/current)))
-     (page/mark! :stream))
-   ;; One statement, as Datastar splits them. The page load's id is made once,
-   ;; so a stream opened again is this load's: one opened as another load
-   ;; would be taken for a copy of the page, and reloaded.
-   (str "(() => {let load = Math.random().toString(36).slice(2), stream, open = () => {"
-     "stream && stream.abort(); stream = new AbortController(); "
-     "@get(location.href, {headers: {'Tropical-Tab': '" tab "', 'Tropical-Load': load}, "
-     "retry: 'always', requestCancellation: stream" (when open-when-hidden ", openWhenHidden: true") "})}; "
-     "addEventListener('tropical:reopen', open); "
-     ;; Leaving a page hides it, where Datastar closes the stream, unless it
-     ;; is kept open; showing it again, as the back/forward cache restores it,
-     ;; reopens it. Kept open, the stream is cancelled as the page is left
-     ;; instead, and opened again, as the same page load, as it is restored.
-     (when open-when-hidden
-       "addEventListener('pagehide', () => stream.abort()); addEventListener('pageshow', (evt) => evt.persisted && open()); ")
-     "open()})()")))
+   (let [page (page/current)
+         own? (= tab (:tab page))]
+     (when own?
+       (page/mark! :stream))
+     (init-js tab (when own? (:revision page)) open-when-hidden))))
 
 
 (defn- rendering
@@ -242,8 +271,9 @@
 
 
 (def ^:no-doc reload-guard-s
-  "How long, in seconds, a page that reloaded because its stream was refused is
-  left as it is if its stream is refused again, instead of reloading in a loop."
+  "How long, in seconds, a page that reloaded because its stream was refused, or
+  its revision was another, is no longer reloaded for the same reason, instead
+  of reloading in a loop."
   10)
 
 
@@ -271,8 +301,9 @@
 
 (defn- reloaded?
   "Whether the page `req` is for reloaded within `reload-guard-s` because its
-  stream was refused: the cookie that refusal set names this page, and another
-  load of it. The load told to reload may itself retry before it unloads."
+  stream was turned away (`reload`): the cookie that set names this page, and
+  another load of it. The load told to reload may itself retry before it
+  unloads."
   [req]
   (when-some [[_ page load] (some->> (get-in req [:headers "cookie"])
                               (re-find (re-pattern (str "(?:^|;)\\s*" reloaded-cookie
@@ -285,6 +316,19 @@
   [resp]
   (into [] (mapcat (fn [[k v]] (when (= "set-cookie" (str/lower-case (str k))) (if (string? v) [v] v))))
     (:headers resp)))
+
+
+(defn- reload
+  "The answer to the stream request `req`: a stream that reloads the page, with
+  the `Set-Cookie` values `cookies`, and a cookie naming the page and the load
+  told to reload (`reloaded?`)."
+  [req cookies]
+  {:status  200
+   :headers {"Content-Type"  "text/event-stream"
+             "Cache-Control" "no-cache"
+             "Set-Cookie"    (conj (vec cookies) (str reloaded-cookie "=" (page-mark req) "." (load-id req)
+                                                   "; Path=/; Max-Age=" reload-guard-s "; HttpOnly; SameSite=Lax"))}
+   :body    reload-event})
 
 
 (defn- refused-stream
@@ -303,12 +347,7 @@
       (do (log/warn "The stream of" (:uri req) "was refused again after its page reloaded. Leaving the tab as it is.")
         (cond-> {:status 204}
           (seq cookies) (assoc :headers {"Set-Cookie" cookies})))
-      {:status  200
-       :headers {"Content-Type"  "text/event-stream"
-                 "Cache-Control" "no-cache"
-                 "Set-Cookie"    (conj cookies (str reloaded-cookie "=" (page-mark req) "." (load-id req)
-                                                 "; Path=/; Max-Age=" reload-guard-s "; HttpOnly; SameSite=Lax"))}
-       :body    reload-event})))
+      (reload req cookies))))
 
 
 (defn- refusal?
@@ -399,6 +438,49 @@
      ~@body))
 
 
+(defn- digest
+  "The first 16 hex digits of a SHA-256 of `s`."
+  [^String s]
+  (subs (HexFormat/.formatHex (HexFormat/of)
+          (MessageDigest/.digest (MessageDigest/getInstance "SHA-256") (String/.getBytes s StandardCharsets/UTF_8)))
+    0 16))
+
+
+(defn- client-code
+  "What tropical puts in the page outside its islands, with fixed arguments:
+  the expression that opens the stream, and the attributes that keep the state
+  the browser owns, which follow the cookie and storage states declared."
+  []
+  (scoping [storage/*owner* "owner"]
+    (str/join "\n" (concat [(init-js "tab" "revision" false) (init-js "tab" "revision" true)]
+                     (map (fn [[k v]] (str k " " v)) (into (sorted-map) (ui/page-attrs)))))))
+
+
+(def ^:private !client
+  "`client-code`'s digest, with the cookie and storage states it was made for."
+  (atom nil))
+
+
+(defn- client-digest
+  "`client-code`'s digest, made again only once the states it follows change."
+  []
+  (let [states          [(cookie/declared) (storage/declared)]
+        [made-for made] @!client]
+    (if (= made-for states)
+      made
+      (let [made (digest (client-code))]
+        (reset! !client [states made])
+        made))))
+
+
+(defn ^:no-doc revision-of
+  "The revision of the page `req` is for, under `app`: a digest of what the page
+  loads outside its islands, which a tab rebuilt in place keeps. Tropical's
+  code in the page, the version of every script, and the app's `:revision`."
+  [app req]
+  (digest (str/join "\n" (concat [(client-digest)] (script/urls) [(when-some [f (:revision app)] (f req))]))))
+
+
 (defn- page-response
   "A new tab, owned by `uid`: the page, server-side rendered from the first frame
   of its new session. A frame that took too long is nil, and the page should
@@ -421,12 +503,15 @@
                                            nil))]
                         [:div {:id (island/element-id (island/call-slot root))}]))
         !marks      (atom #{})
+        ;; Outside the page: it renders the page's attributes itself.
+        revision    (revision-of app req)
         body        (scoping [storage/*owner* (storage/owner uid)
                               page/*page* {:tab              tab
                                            :frame            frame
                                            :scripts          scripts
                                            :placeholder      placeholder
                                            :open-when-hidden (:open-when-hidden app)
+                                           :revision         revision
                                            :!marks           !marks}]
                       ((:page app) {:tab tab :frame frame :scripts scripts :request req}))]
     (when (or (not page) (not (contains? @!marks :stream)))
@@ -474,23 +559,35 @@
   session. A tab the server doesn't know, because its session expired or the
   server restarted, gets a fresh session, built from this request. Another
   user's tab is refused, with a reload (`refused-stream`). The stream is
-  compressed with the app's encoding the request accepts, if any."
+  compressed with the app's encoding the request accepts, if any.
+
+  A page of another revision than the server's, or of none, from before
+  revisions, is reloaded first, with no session built: what it loaded has
+  changed since. If it is of another again just after it reloaded, the
+  servers disagree on its revision, and the tab is rebuilt in place."
   [app req uid hold?]
-  (let [{:strs [tropical-tab tropical-load last-event-id accept-encoding]} (:headers req)
-        session  (when (parse-uuid (str tropical-tab))
-                   (kept-by req (session/obtain! tropical-tab uid (with-request app req))))
-        encoding (compression/choose (:compression app) accept-encoding)]
-    (if session
-      {:status  200
-       :headers (cond-> {"Content-Type"  "text/event-stream"
-                         "Cache-Control" "no-cache"}
-                  ;; A connection-specific header, which HTTP/2 forbids.
-                  (= "HTTP/1.1" (:protocol req)) (assoc "Connection" "keep-alive")
-                  (seq (:compression app)) (assoc "Vary" "Accept-Encoding")
-                  encoding (assoc "Content-Encoding" (name encoding)))
-       ;; The last event id the client read, which says what it has (`sse/mark!`).
-       :body    (->StreamBody session tropical-load (re-matches #"[0-9a-z.]{1,40}" (str last-event-id)) hold? encoding)}
-      (refused-stream req nil))))
+  (let [{:strs [tropical-tab tropical-load tropical-revision last-event-id accept-encoding]} (:headers req)
+        stale? (not= tropical-revision (revision-of app req))]
+    (if (and stale? (not (reloaded? req)))
+      (do (log/debug "The page" (:uri req) "is of another revision than this server's: reloading it.")
+        (reload req nil))
+      (let [session  (when (parse-uuid (str tropical-tab))
+                       (kept-by req (session/obtain! tropical-tab uid (with-request app req))))
+            encoding (compression/choose (:compression app) accept-encoding)]
+        (when stale?
+          (log/warn "The page" (:uri req) "is of another revision than this server's, just after it reloaded for"
+            "that: rebuilding the tab in place. Servers whose :revision differs do this."))
+        (if session
+          {:status  200
+           :headers (cond-> {"Content-Type"  "text/event-stream"
+                             "Cache-Control" "no-cache"}
+                      ;; A connection-specific header, which HTTP/2 forbids.
+                      (= "HTTP/1.1" (:protocol req)) (assoc "Connection" "keep-alive")
+                      (seq (:compression app)) (assoc "Vary" "Accept-Encoding")
+                      encoding (assoc "Content-Encoding" (name encoding)))
+           ;; The last event id the client read, which says what it has (`sse/mark!`).
+           :body    (->StreamBody session tropical-load (re-matches #"[0-9a-z.]{1,40}" (str last-event-id)) hold? encoding)}
+          (refused-stream req nil))))))
 
 
 (def ^:private too-large
@@ -656,13 +753,17 @@
   Called sync, it holds the stream request's thread for as long as the stream
   is open: run sync handlers on virtual threads.
 
-  Throws for an encoding in `:compression` it can't load, and for a
-  `:stream-max-ms` that isn't a positive number of ms."
+  Throws for an encoding in `:compression` it can't load, for a
+  `:stream-max-ms` that isn't a positive number of ms, and for a `:revision`
+  that isn't a fn."
   [app]
   (some-> (:compression app) compression/check!)
   (when-not (or (nil? (:stream-max-ms app)) (pos-int? (:stream-max-ms app)))
     (throw (IllegalArgumentException.
              (str ":stream-max-ms is a positive number of ms, not " (pr-str (:stream-max-ms app)) "."))))
+  (when-not (or (nil? (:revision app)) (fn? (:revision app)) (var? (:revision app)))
+    (throw (IllegalArgumentException.
+             (str ":revision is a fn of the request, as (fn [request] revision), not " (pr-str (:revision app)) "."))))
   ;; Whether a page without `ui/page-attrs` has been logged yet.
   (let [app (assoc app ::unkept (atom false))]
     (fn

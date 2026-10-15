@@ -9,7 +9,7 @@
     [co.multiply.scoped :refer [ask]]))
 
 
-;; `{:tab :frame :scripts :placeholder :open-when-hidden :!marks}`, bound by
+;; `{:tab :frame :scripts :placeholder :open-when-hidden :revision :!marks}`, bound by
 ;; `co.multiply.tropical.ring` around the app's `:page`. Without a root, so that
 ;; `ask` gets its default where nothing binds it.
 #_{:clj-kondo/ignore [:uninitialized-var]}

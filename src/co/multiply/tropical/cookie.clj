@@ -80,6 +80,14 @@
 (defonce ^:private !states (atom {}))
 
 
+(defn declared
+  "Every cookie state declared, by signal name: the same map until a state is
+  declared, or declared again."
+  {:no-doc true}
+  []
+  @!states)
+
+
 (defrecord State [id signal default valid? shape])
 
 
@@ -252,10 +260,11 @@
 
 (defn- write-cookie
   "The statements writing the `_cookie` signals of a signal patch, `patch`,
-  into the cookie."
+  into the cookie. The states in order, so that every server writes the same
+  page (`ring/handler`'s revision)."
   []
   (str
-    "const d = " (json/write-str (into {} (map (fn [[signal state]] [signal (:default state)])) @!states)) ";"
+    "const d = " (json/write-str (into (sorted-map) (map (fn [[signal state]] [signal (:default state)])) @!states)) ";"
     "const n = '" cookie-name "';"
     "const raw = document.cookie.split('; ').find(c => c.startsWith(n + '='));"
     "let c = {};"

@@ -1034,6 +1034,18 @@
   "https://cdn.jsdelivr.net/gh/starfederation/datastar@v1.0.4/bundles/datastar-rocket.js")
 
 
+(def ^:private tailwind-url
+  "https://unpkg.com/@tailwindcss/browser@4")
+
+
+(defn revision
+  "What the page's head loads, for the app's `:revision`: a tab opened before it
+  changed reloads when its stream next connects, where it would be rebuilt in
+  place on the head it has."
+  [_]
+  (str/join " " [tailwind-url datastar-url]))
+
+
 (def ^:private import-map
   ;; Modules import Datastar, and Rocket, as `datastar`: the page's own copy, as
   ;; a second would be a second engine.
@@ -1054,7 +1066,7 @@
        [:meta {:charset "utf-8"}]
        [:meta {:name "viewport" :content "width=device-width, initial-scale=1"}]
        [:title "Tropical"]
-       [:script {:nonce nonce :src "https://unpkg.com/@tailwindcss/browser@4"}]
+       [:script {:nonce nonce :src tailwind-url}]
        ;; Before the first module.
        [:script {:nonce nonce :type "importmap"} (h/raw import-map)]
        [:script {:nonce nonce :type "module" :src datastar-url}]

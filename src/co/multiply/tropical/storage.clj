@@ -100,6 +100,14 @@
 (defonce ^:private !states (atom {}))
 
 
+(defn declared
+  "Every storage state declared, by signal name: the same map until a state is
+  declared, or declared again."
+  {:no-doc true}
+  []
+  @!states)
+
+
 (defrecord State [id signal default valid? encode decode version max-age-ms shape])
 
 
@@ -387,9 +395,10 @@
 
 
 (defn- states-js
-  "Each declared state's version and age, by signal, as the page needs them."
+  "Each declared state's version and age, by signal, as the page needs them: in
+  order, so that every server writes the same page (`ring/handler`'s revision)."
   []
-  (island/json-js (into {} (map (fn [[signal {:keys [version max-age-ms]}]] [signal [version max-age-ms]])) @!states)))
+  (island/json-js (into (sorted-map) (map (fn [[signal {:keys [version max-age-ms]}]] [signal [version max-age-ms]])) @!states)))
 
 
 (defn- page-owner

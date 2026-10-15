@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- A page reloads when its stream connects to a server on which what it loaded outside its islands has changed, where
+  the tab was rebuilt in place on the page it had: tropical's code in the page, the scripts, whose changed components
+  `customElements.define` wouldn't take up, and the head, as the app names it with the new `:revision`,
+  `(fn [request] revision)`, such as a digest of the URLs its head loads. A page carries a revision, which its stream
+  sends each time it connects, and one of another reloads before a session is built for it. A deploy that changes
+  none of these still rebuilds open tabs in place. In development, a tab whose page loaded an edited script reloads
+  after `session/close-all!`. Pages from before this release carry none, and reload once.
+- A page of another revision again just after it reloaded, as when servers disagree on it, is rebuilt in place, with
+  a warning.
+
 ## 0.5.0 - 2026-10-14
 
 - `observe` given `pending` among its args returns `pending` and opens nothing, so a read given another's value starts
