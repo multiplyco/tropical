@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- A `use-watch` whose selector throws keeps its subscription, retries when the source changes, and releases the
+  subscription when the island unmounts. Failed selections could leave watches behind and never recover.
+- `storage/observe` preserves a valid `false` instead of replacing it with the state's default.
+- Closing a session after a render fails past its error views, as running out of memory does, releases the holds
+  its islands currently own, without leaking new holds or releasing already-dropped holds a second time.
+
 ## 0.6.0 - 2026-10-15
 
 - A page reloads when its stream connects to a server on which what it loaded outside its islands has changed, where

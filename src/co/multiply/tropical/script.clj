@@ -59,10 +59,7 @@
     [co.multiply.tropical.page :as page])
   (:import
     [java.io File]
-    [java.net URL]
-    [java.nio.charset StandardCharsets]
-    [java.security MessageDigest]
-    [java.util HexFormat]))
+    [java.net URL]))
 
 
 (def path
@@ -95,18 +92,11 @@
   (names/opaque (str/replace (str (namespace id) "." (name id)) #"[^A-Za-z0-9._-]" "_") 10))
 
 
-(defn- digest
-  [^String js]
-  (subs (HexFormat/.formatHex (HexFormat/of)
-          (MessageDigest/.digest (MessageDigest/getInstance "SHA-256") (.getBytes js StandardCharsets/UTF_8)))
-    0 16))
-
-
 (defn- version
   "The version of the script `script-name` whose content is `js`."
   [script-name ^String js modified now]
   {:js       js
-   :url      (str path script-name "." (digest js) ".js")
+   :url      (str path script-name "." (names/digest js 16) ".js")
    :modified modified
    :checked  now})
 
@@ -134,13 +124,7 @@
     (when-not (string? js)
       (throw (IllegalArgumentException. (str "Script " id ": its :js is a string."))))
     (let [script (->Script id n file (atom (version n js (some-> ^File file File/.lastModified) now)))]
-      (swap! !scripts (fn [scripts]
-                        (when-some [other (get scripts n)]
-                          (when (not= id (:id other))
-                            (throw (IllegalArgumentException.
-                                     (str "Script " id " would share its URL with " (:id other) "; rename one.")))))
-                        (assoc scripts n script)))
-      script)))
+      (names/register! !scripts n script "Script" "URL"))))
 
 
 (defmacro defscript

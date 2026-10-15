@@ -24,12 +24,15 @@
                               "--middleware" "[cider.nrepl/cider-middleware]"
                               "--interactive")}
 
-  test            {:doc     "Run tests"
-                   :depends [compile:java]
+  test            {:doc     "Run JVM and browser-state tests (requires Node.js)"
+                   :depends [compile:java test:browser]
                    :task    (apply shell "clj" "-M:test" *command-line-args*)}
 
+  test:browser    {:doc  "Test the embedded browser-state programs (requires Node.js)"
+                   :task (shell "node --test test/browser-state.test.mjs")}
+
   test:linux      {:doc      "Run tests in Linux, under JDK 25 in Docker: amd64 (default), arm64, amd64-musl, arm64-musl, all"
-                   :depends  [compile:java]
+                   :depends  [compile:java test:browser]
                    :requires ([clojure.string :as str])
                    ;; The repository is mounted read-only, the classes compiled
                    ;; here; the dependencies are kept in a volume of their own,

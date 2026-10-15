@@ -5,7 +5,7 @@ reaches the sessions that read it, and how a session keeps its tab. How resource
 [Reading from outside the page](reading.md#a-resources-life), and how actions reach their handlers in
 [Actions](actions.md). Why it is built this way, and what was rejected, is in [the design notes](design.md).
 
-## Islands and frames (`island`, `runtime`)
+## Islands and frames (`island`, `runtime`, `internal.frame`)
 
 - **Compile once, emit by appending.** A render is serialized once, by [Chassis](https://github.com/onionpancakes/chassis),
   into a template: strings, plus holes where child islands go. Emitting the page appends cached strings, so an
@@ -30,6 +30,8 @@ reaches the sessions that read it, and how a session keeps its tab. How resource
   and the exception is logged with a reference the default view shows. It doesn't fail the session, unless it leaves
   the JVM in no state to go on, as running out of memory does. A failure in the session's own loop, outside the
   islands' renders, closes the session and its stream, so the client reconnects into a new one.
+  A watch whose selector throws remains a read: a change to its source retries the render, and unmounting releases
+  it just like a successful read.
 
 ## Signals (`signal`)
 

@@ -103,6 +103,7 @@
     [co.multiply.tropical.compression :as compression]
     [co.multiply.tropical.cookie :as cookie]
     [co.multiply.tropical.island :as island]
+    [co.multiply.tropical.names :as names]
     [co.multiply.tropical.page :as page]
     [co.multiply.tropical.script :as script]
     [co.multiply.tropical.session :as session]
@@ -114,9 +115,7 @@
   (:import
     [co.multiply.tropical.sse EventStream]
     [java.io ByteArrayOutputStream InputStream IOException OutputStream]
-    [java.nio.charset StandardCharsets]
-    [java.security MessageDigest]
-    [java.util HexFormat]))
+    [java.nio.charset StandardCharsets]))
 
 
 (def max-signals-bytes
@@ -438,14 +437,6 @@
      ~@body))
 
 
-(defn- digest
-  "The first 16 hex digits of a SHA-256 of `s`."
-  [^String s]
-  (subs (HexFormat/.formatHex (HexFormat/of)
-          (MessageDigest/.digest (MessageDigest/getInstance "SHA-256") (String/.getBytes s StandardCharsets/UTF_8)))
-    0 16))
-
-
 (defn- client-code
   "What tropical puts in the page outside its islands, with fixed arguments:
   the expression that opens the stream, and the attributes that keep the state
@@ -468,7 +459,7 @@
         [made-for made] @!client]
     (if (= made-for states)
       made
-      (let [made (digest (client-code))]
+      (let [made (names/digest (client-code) 16)]
         (reset! !client [states made])
         made))))
 
@@ -478,7 +469,7 @@
   loads outside its islands, which a tab rebuilt in place keeps. Tropical's
   code in the page, the version of every script, and the app's `:revision`."
   [app req]
-  (digest (str/join "\n" (concat [(client-digest)] (script/urls) [(when-some [f (:revision app)] (f req))]))))
+  (names/digest (str/join "\n" (concat [(client-digest)] (script/urls) [(when-some [f (:revision app)] (f req))])) 16))
 
 
 (defn- page-response

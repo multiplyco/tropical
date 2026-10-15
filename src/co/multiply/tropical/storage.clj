@@ -60,14 +60,12 @@
     [clojure.string :as str]
     [co.multiply.scoped :refer [ask]]
     [co.multiply.tropical.action :as action]
-    [co.multiply.tropical.cookie :as cookie]
+    [co.multiply.tropical.internal.browser-code :as browser-code]
+    [co.multiply.tropical.internal.browser-state :as browser-state]
     [co.multiply.tropical.island :as island]
+    [co.multiply.tropical.names :as names]
     [co.multiply.tropical.resource :as resource]
-    [s-exp.oda :as json])
-  (:import
-    [java.nio.charset StandardCharsets]
-    [java.security MessageDigest]
-    [java.util HexFormat]))
+    [s-exp.oda :as json]))
 
 
 (def ^:no-doc prefix
@@ -138,7 +136,7 @@
   [id {:keys [default valid? encode decode version] :or {valid? some? encode identity decode identity version 1}
        :as   opts}]
   (let [what  (str "Storage state " id)
-        state (->State id (cookie/signal-name id) default valid? encode decode version
+        state (->State id (browser-state/signal-name id) default valid? encode decode version
                 (:max-age-ms opts max-age-ms) (atom nil))]
     (when-not (contains? opts :default)
       (throw (IllegalArgumentException. (str what ": it takes a :default."))))
@@ -151,13 +149,7 @@
                  ", not as it went. Give it an :encode and a :decode that keep its values, such as keywords."))))
     (when-not (or (int? version) (string? version))
       (throw (IllegalArgumentException. (str what ": its :version is an integer or a string."))))
-    (swap! !states (fn [states]
-                     (when-some [other (get states (:signal state))]
-                       (when (not= id (:id other))
-                         (throw (IllegalArgumentException.
-                                  (str what " would share its signal with " (:id other) "; rename one.")))))
-                     (assoc states (:signal state) state)))
-    state))
+    (names/register! !states (:signal state) state "Storage state" "signal")))
 
 
 (defmacro defstorage
@@ -192,9 +184,7 @@
   isn't kept in the browser."
   {:no-doc true}
   [uid]
-  (let [digest (MessageDigest/.digest (MessageDigest/getInstance "SHA-256")
-                 (String/.getBytes (str "tropical-storage/" uid) StandardCharsets/UTF_8))]
-    (subs (HexFormat/.formatHex (HexFormat/of) digest) 0 16)))
+  (names/digest (str "tropical-storage/" uid) 16))
 
 
 ;; The owner of the page being rendered, `owner`'s. Bound by
@@ -204,10 +194,16 @@
 (def ^:dynamic ^:no-doc *owner*)
 
 
-(def ^:private global
+(def ^:private global-name
   "Where the page keeps what the handler needs between patches: the default
   each entry was declared with, by key, and the timers of `observe`'s sends."
-  "globalThis.__tropicalStorage ??= {defaults: {}, timers: {}}")
+  "__tropicalStorage")
+
+
+(defn- global-js
+  "The expression initializing the page's shared storage bookkeeping."
+  []
+  (str "globalThis[" (island/json-js global-name) "] ??= {defaults: {}, timers: {}}"))
 
 
 (defn- key-js
@@ -225,24 +221,13 @@
   "_")
 
 
-(defn- claim-shape!
-  "Records that `state` is used with an item, or without, if `item` is nil;
-  throws if it was used the other way."
-  [state item]
-  (let [shape (if item :items :single)]
-    (when-not (= shape (swap! (:shape state) #(or % shape)))
-      (throw (IllegalArgumentException.
-               (str "Storage state " (:id state) " is used " (if item "with an item and without" "without an item and with")
-                 "; use it one way."))))))
-
-
 (defn- load-js
   "The expression that gives an entry's value as the page starts: the
   browser's, if it has one under `state`'s version and young enough, else
   `default-json`. It records the default, for the handler. It has no `;`, so
   no string in the default can make Datastar split it into statements."
   [k-js {:keys [version max-age-ms]} default-json]
-  (str "((k, d) => ((" global ").defaults[k] = JSON.stringify(d), "
+  (str "((k, d) => ((" (global-js) ").defaults[k] = JSON.stringify(d), "
     "(e => e && e.version === " (island/json-js version) " && Date.now() - e.at <= " max-age-ms " ? e.value : d)"
     "((() => { try { return JSON.parse(localStorage.getItem(k)) } catch (_) { return null } })())))"
     "(" k-js ", " default-json ")"))
@@ -269,12 +254,12 @@
   ([state item]
    (use-storage state item nil))
   ([state item opts]
-   (let [item    (some-> item cookie/item-name)
+   (let [item    (some-> item browser-state/item-name)
          slot    (or item single)
          default (if (contains? opts :default) (:default opts) (:default state))
          encoded ((:encode state) default)
          {:keys [uid]} (island/use-session)]
-     (claim-shape! state item)
+     (browser-state/claim-shape! "Storage" state item)
      (check-json (str "Storage state " (:id state) "'s default") encoded)
      (island/declare-signal ["_storage" (:signal state) slot]
        (island/js (load-js (key-js (owner uid) (:signal state) slot) state (island/json-js encoded))))
@@ -324,7 +309,7 @@
           {:idempotent true})]
     (reset! !handler (fn [body]
                        (let [v (get body "value")]
-                         (reset! !value (if (nil? v) default (or (decode state v) default)))
+                         (reset! !value (if-some [decoded (decode state v)] decoded default))
                          nil)))
     (island/declare-signal ["_storageWatch" token] [(:signal state) slot])
     (let [v (island/use-watch !value)]
@@ -337,8 +322,8 @@
 (defn- entry-path
   "The path under `_storage` of the entry of `state`, or its `item`."
   [state item]
-  (let [item (some-> item cookie/item-name)]
-    (claim-shape! state item)
+  (let [item (some-> item browser-state/item-name)]
+    (browser-state/claim-shape! "Storage" state item)
     [(:signal state) (or item single)]))
 
 
@@ -394,18 +379,31 @@
 ;; The page ---------------------------------------------------------------------
 
 
-(defn- states-js
-  "Each declared state's version and age, by signal, as the page needs them: in
-  order, so that every server writes the same page (`ring/handler`'s revision)."
-  []
-  (island/json-js (into (sorted-map) (map (fn [[signal {:keys [version max-age-ms]}]] [signal [version max-age-ms]])) @!states)))
-
-
 (defn- page-owner
   []
   (ask *owner* (throw (IllegalStateException.
                         (str "ui/page-attrs renders a page's body, whose user co.multiply.tropical.ring knows "
                           "while it renders the page.")))))
+
+
+(defn- config-js
+  "The owner's storage definitions in stable order, also part of the page revision."
+  []
+  (island/json-js
+    {:owner (page-owner)
+     :states (into (sorted-map)
+               (map (fn [[signal {:keys [version max-age-ms]}]] [signal [version max-age-ms]]))
+               @!states)
+     :prefix prefix
+     :globalName global-name}))
+
+
+(def ^:private keep-program
+  (browser-code/program "storage-keep.js"))
+
+
+(def ^:private prune-program
+  (browser-code/program "storage-prune.js"))
 
 
 (defn handler-js
@@ -414,87 +412,12 @@
   `forget` names, and send `observe`'s values."
   {:no-doc true}
   []
-  (str
-    "try {"
-    "const g = " global ";"
-    "const o = " (island/json-js (page-owner)) ", v = " (states-js) ", p = " (island/json-js prefix) ";"
-    "const key = (s, i) => p + JSON.stringify([o, s, i]);"
-    "const has = (x, k) => x !== null && typeof x === 'object' && k in x;"
-    ;; Reads a signal without creating it, as reading `$` would.
-    "const get = (...ks) => { let x = $; for (const k of ks) { if (!has(x, k)) return undefined; x = x[k] } return x };"
-    "const put = (k, x) => {"
-    "try { localStorage.setItem(k, x); return } catch (_) {}"
-    ;; Full: the oldest entries go first.
-    "const ours = [];"
-    "for (let n = 0; n < localStorage.length; n++) {"
-    "const q = localStorage.key(n);"
-    "if (q && q !== k && q.startsWith(p)) { let t = 0; try { t = JSON.parse(localStorage.getItem(q)).at } catch (_) {} ours.push([t, q]) }"
-    "}"
-    "ours.sort((a, b) => a[0] - b[0]);"
-    "for (const [, q] of ours) { localStorage.removeItem(q); try { localStorage.setItem(k, x); return } catch (_) {} }"
-    "};"
-    "const keep = (s, i) => {"
-    "const st = v[s];"
-    "if (!st) return;"
-    "const k = key(s, i), x = get('_storage', s, i);"
-    "if (x === undefined || x === null || JSON.stringify(x) === g.defaults[k]) localStorage.removeItem(k);"
-    "else put(k, JSON.stringify({version: st[0], at: Date.now(), value: x}));"
-    "};"
-    "const send = t => {"
-    "clearTimeout(g.timers[t]);"
-    "delete g.timers[t];"
-    "const w = get('_storageWatch', t);"
-    "if (!w) return;"
-    "const x = get('_storage', w[0], w[1]);"
-    "fetch(location.href, {method: 'POST', headers: {'Tropical-Action': t, 'Content-Type': 'application/json'},"
-    " body: JSON.stringify({value: x === undefined ? null : x})})"
-    ".then(r => {"
-    " if (r.headers.has('Tropical-Reopen')) dispatchEvent(new CustomEvent('tropical:reopen'));"
-    " else if (r.status === 403 || r.status === 404) $._storageWatch[t] = null })"
-    ".catch(() => {});"
-    "};"
-    "const later = (t, ms) => { clearTimeout(g.timers[t]); g.timers[t] = setTimeout(() => send(t), ms) };"
-    "const watching = (s, i) => Object.entries(get('_storageWatch') || {})"
-    ".filter(([, w]) => w && w[0] === s && w[1] === i).map(([t]) => t);"
-    "for (const [s, items] of Object.entries(patch._storage || {})) {"
-    "if (items === null || typeof items !== 'object') continue;"
-    "for (const i of Object.keys(items)) { keep(s, i); for (const t of watching(s, i)) later(t, 300) }"
-    "}"
-    "for (const [t, w] of Object.entries(patch._storageWatch || {})) if (w) later(t, 0);"
-    "const f = patch._storageForget;"
-    "if (f) {"
-    "for (const [s, items] of Object.entries(f)) {"
-    "if (items === null || typeof items !== 'object') continue;"
-    "for (const i of Object.keys(items)) {"
-    "const k = key(s, i), d = g.defaults[k];"
-    "localStorage.removeItem(k);"
-    "if (get('_storage', s, i) !== undefined) $._storage[s][i] = d === undefined ? null : JSON.parse(d);"
-    "for (const t of watching(s, i)) later(t, 0);"
-    "}"
-    "}"
-    "$._storageForget = null;"
-    "}"
-    "} catch (e) { console.error(e) }"))
+  (browser-code/call keep-program ["$" "patch" (config-js)]))
 
 
 (defn prune-js
-  "The statements, run once as the page starts (`ui/page-attrs`), that drop
-  the entries the page won't use: another user's, older than their state's
-  `:max-age-ms`, stored under another `:version`, or of a state no longer
-  declared."
+  "The expression run as the page starts, dropping entries for other users,
+  expired entries, and definitions or versions no longer in use."
   {:no-doc true}
   []
-  (str
-    "try {"
-    "const o = " (island/json-js (page-owner)) ", v = " (states-js) ", p = " (island/json-js prefix) ", now = Date.now();"
-    "for (let n = localStorage.length - 1; n >= 0; n--) {"
-    "const k = localStorage.key(n);"
-    "if (!k || !k.startsWith(p)) continue;"
-    "let kept = false;"
-    "try {"
-    " const [ko, s] = JSON.parse(k.slice(p.length)), e = JSON.parse(localStorage.getItem(k)), st = v[s];"
-    " kept = ko === o && !!st && e.version === st[0] && now - e.at <= st[1]"
-    " } catch (_) {}"
-    "if (!kept) localStorage.removeItem(k);"
-    "}"
-    "} catch (_) {}"))
+  (str "void (() => {" (browser-code/call prune-program [(config-js)]) "})()"))

@@ -89,6 +89,8 @@
       "the port")
     (is (= 1 (count (re-seq datastar-statement (str/trim data-on-signal-patch))))
       "one statement to Datastar, which would otherwise return its last")
+    (is (= 1 (count (re-seq datastar-statement (str/trim data-effect))))
+      "the pruning program also stays one statement")
     (is (thrown? IllegalArgumentException (owned {:data-effect "mine"})) "an attribute of the body's own it would replace")
     (is (= (upload/drop-guard) (select-keys attrs (keys (upload/drop-guard))))
       "files dropped outside a drop area refused, on every page")

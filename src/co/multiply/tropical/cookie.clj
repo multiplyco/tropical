@@ -52,10 +52,11 @@
   render in the first frame is `co.multiply.tropical.storage`'s. A state is
   used either with an item, as one per item, or without, never both."
   (:require
-    [clojure.string :as str]
     [co.multiply.scoped :refer [ask]]
     [co.multiply.tropical.island :as island]
     [co.multiply.tropical.names :as names]
+    [co.multiply.tropical.internal.browser-code :as browser-code]
+    [co.multiply.tropical.internal.browser-state :as browser-state]
     [s-exp.oda :as json])
   (:import
     [java.net URLDecoder]
@@ -96,7 +97,7 @@
   digest of it, unless names are readable (`co.multiply.tropical.names`)."
   {:no-doc true}
   [id]
-  (names/opaque (str/replace (str (namespace id) "__" (name id)) #"[^A-Za-z0-9_]" "_") 10))
+  (browser-state/signal-name id))
 
 
 (defn state*
@@ -108,13 +109,7 @@
   (when-not (valid? default)
     (throw (IllegalArgumentException. (str "Cookie state " id ": its default " (pr-str default) " isn't valid."))))
   (let [state (->State id (signal-name id) default valid? (atom nil))]
-    (swap! !states (fn [states]
-                     (when-some [other (get states (:signal state))]
-                       (when (not= id (:id other))
-                         (throw (IllegalArgumentException.
-                                  (str "Cookie state " id " would share its signal with " (:id other) "; rename one.")))))
-                     (assoc states (:signal state) state)))
-    state))
+    (names/register! !states (:signal state) state "Cookie state" "signal")))
 
 
 (defmacro defcookie
@@ -157,22 +152,7 @@
   as a step into the signal."
   {:no-doc true}
   [item]
-  (let [n (if (keyword? item) (str (symbol item)) (str item))]
-    (when (str/includes? n ".")
-      (throw (IllegalArgumentException. (str "An item's name can't hold a '.', as " (pr-str n) " does: "
-                                          "Datastar reads it as a step into the signal."))))
-    n))
-
-
-(defn- claim-shape!
-  "Records that `state` is used with an item, or without, if `item` is nil;
-  throws if it was used the other way."
-  [state item]
-  (let [shape (if item :items :single)]
-    (when-not (= shape (swap! (:shape state) #(or % shape)))
-      (throw (IllegalArgumentException.
-               (str "Cookie state " (:id state) " is used " (if item "with an item and without" "without an item and with")
-                 "; use it one way."))))))
+  (browser-state/item-name item))
 
 
 (defn- kept
@@ -195,7 +175,7 @@
   ([state item]
    (let [item (some-> item item-name)
          path (cond-> ["_cookie" (:signal state)] item (conj item))]
-     (claim-shape! state item)
+     (browser-state/claim-shape! "Cookie" state item)
      (let [v (kept state item)]
        (island/declare-signal path v)
        {:state state
@@ -225,7 +205,7 @@
       (throw (IllegalArgumentException. (str "A cookie state's entry is [state item value], or [state value]; not "
                                           (pr-str e) "."))))
     (let [item (some-> item item-name)]
-      (claim-shape! state item)
+      (browser-state/claim-shape! "Cookie" state item)
       (when-not (and (or (boolean? v) (number? v) (string? v))
                   (try ((:valid? state) v) (catch Exception _ false)))
         (throw (IllegalArgumentException. (str "Cookie state " (:id state) ": " (pr-str v) " isn't a valid value."))))
@@ -258,27 +238,8 @@
 ;; The page ---------------------------------------------------------------------
 
 
-(defn- write-cookie
-  "The statements writing the `_cookie` signals of a signal patch, `patch`,
-  into the cookie. The states in order, so that every server writes the same
-  page (`ring/handler`'s revision)."
-  []
-  (str
-    "const d = " (json/write-str (into (sorted-map) (map (fn [[signal state]] [signal (:default state)])) @!states)) ";"
-    "const n = '" cookie-name "';"
-    "const raw = document.cookie.split('; ').find(c => c.startsWith(n + '='));"
-    "let c = {};"
-    "try { c = raw ? JSON.parse(decodeURIComponent(raw.slice(n.length + 1))) : {} } catch (e) {}"
-    "if (c === null || typeof c !== 'object' || Array.isArray(c)) c = {};"
-    ;; A state no longer declared: renamed, or gone.
-    "for (const k of Object.keys(c)) if (!(k.split('/')[0] in d)) delete c[k];"
-    "for (const [s, v] of Object.entries(patch._cookie || {})) {"
-    "const kv = v !== null && typeof v === 'object' ? Object.entries(v).map(([i, x]) => [s + '/' + i, x]) : [[s, v]];"
-    "for (const [k, x] of kv) { delete c[k]; if (s in d && x !== null && x !== undefined && x !== d[s]) c[k] = x }"
-    "}"
-    "let e = encodeURIComponent(JSON.stringify(c));"
-    "while (e.length > " max-cookie-chars ") { delete c[Object.keys(c)[0]]; e = encodeURIComponent(JSON.stringify(c)) }"
-    "document.cookie = n + '=' + e + '; path=/; max-age=31536000; samesite=lax'"))
+(def ^:private keep-program
+  (browser-code/program "cookie-keep.js"))
 
 
 (defn handler-js
@@ -286,4 +247,8 @@
   keep the `_cookie` signals of `patch` in the cookie."
   {:no-doc true}
   []
-  (str "if (patch._cookie) {" (write-cookie) "}"))
+  (browser-code/call keep-program
+    ["patch" (island/json-js
+               {:defaults (into (sorted-map) (map (fn [[signal state]] [signal (:default state)])) @!states)
+                :name cookie-name
+                :maxChars max-cookie-chars})]))

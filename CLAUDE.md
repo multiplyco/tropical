@@ -75,10 +75,11 @@ hygiene.
 
 ## Testing
 
-`bb test` (kaocha); `bb test:linux` runs them in Linux containers under JDK 25 (amd64 by default, or arm64, musl,
-`all`), where the shipped libraries are what's tested. Test philosophy: invariants over wording. Exact error messages
-and renderings drift by design — don't pin them. Lifecycles (what is held, released, revoked), coalescing and what
-reaches the client are the contract.
+`bb test` runs the JVM tests (kaocha) and the browser-state JavaScript tests (Node.js). `bb test:linux` runs the
+JavaScript tests once on the host, then the JVM tests in Linux containers under JDK 25 (amd64 by default, or arm64,
+musl, `all`), where the shipped libraries are what's tested. `bb test:browser` runs only the JavaScript tests.
+Test philosophy: invariants over wording. Exact error messages and renderings drift by design — don't pin them.
+Lifecycles (what is held, released, revoked), coalescing and what reaches the client are the contract.
 
 Apps test their islands with `co.multiply.tropical.test`, which ships in the jar. The library's own tests use
 `test_util.clj`: `harness`, which drives a runtime the way a session's pump does and gives them its frames;

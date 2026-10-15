@@ -100,6 +100,21 @@
   (second (re-find #"&quot;_storageWatch&quot;:\{&quot;([^&]+)&quot;" html)))
 
 
+(deftest an-observed-boolean-keeps-false
+  (let [state (storage/state* 'storage-test/enabled {:default true :valid? boolean?})
+        reader (island/island-fn "boolean-reader" nil
+                 (fn [] [:p (str (storage/observe (storage/use-storage state)))]))
+        {:keys [step rt]} (harness reader)]
+    (try
+      (let [token (watch-token (island/html (step)))]
+        (action/invoke! token "user" {"value" false})
+        (is (re-find #">false<" (island/html (step))))
+        (action/invoke! token "user" {"value" "invalid"})
+        (is (re-find #">true<" (island/html (step))) "invalid values still use the default"))
+      (finally
+        (runtime/dispose! rt)))))
+
+
 (defisland counted
   [id reads]
   (let [draft (storage/use-storage edits id {:default {"text" "start"}})

@@ -72,13 +72,13 @@
   threw, is closed, and so is its stream: the client reconnects into a new
   session instead of waiting on one that sends nothing."
   (:require
-    [clojure.string :as str]
     [clojure.tools.logging :as log]
     [co.multiply.quiescent :as q]
-    [co.multiply.tropical.island :as island]
+    [co.multiply.tropical.internal.delivery :as delivery]
+    [co.multiply.tropical.internal.frame :as frame]
+    [co.multiply.tropical.internal.signal-patch :as signal-patch]
     [co.multiply.tropical.runtime :as runtime]
-    [co.multiply.tropical.sse :as sse]
-    [dev.onionpancakes.chassis.core :as h])
+    [co.multiply.tropical.sse :as sse])
   (:import
     [co.multiply.tropical.signal Inbox]
     [java.util ArrayList]
@@ -207,45 +207,6 @@
       nil)))
 
 
-(defn- signal-keys
-  "`signals` with its keys as their names in JSON, so that a keyword and a
-  string naming one signal merge."
-  [signals]
-  (into {}
-    (map (fn [[k v]]
-           [(if (keyword? k) (str (symbol k)) (str k)) (cond-> v (map? v) signal-keys)]))
-    signals))
-
-
-(defn- merge-patch
-  "The one patch that does what the signal patches `a` and then `b` do, as
-  Datastar applies them (JSON merge patches), or `::apart` if none does. None
-  does where `a` replaces a value, nil included, and `b` merges a map into
-  what `a` put there: merged into one, the map would merge into the value `a`
-  replaced."
-  [a b]
-  (reduce-kv (fn [acc k v]
-               (cond
-                 (not (contains? acc k)) (assoc acc k v)
-                 (not (map? v)) (assoc acc k v)
-                 (map? (get acc k)) (let [m (merge-patch (get acc k) v)]
-                                      (if (identical? ::apart m) (reduced m) (assoc acc k m)))
-                 :else (reduced ::apart)))
-    a
-    b))
-
-
-(defn- add-signals
-  "`pending`, the signal patches waiting for the client, with `signals` after
-  them, merged into the last where one patch does both."
-  [pending signals]
-  (let [signals (signal-keys signals)
-        merged  (some-> (peek pending) (merge-patch signals))]
-    (if (or (nil? merged) (identical? ::apart merged))
-      (conj (or pending []) signals)
-      (conj (pop pending) merged))))
-
-
 (defn- handle
   [st event]
   (if (:closed? st)
@@ -277,7 +238,7 @@
       ;; From an island still mounted, as the instance that made it.
       :signals (let [[_ id !state signals] event]
                  (if (runtime/mounted-as? (:rt st) id !state)
-                   (update st :signals add-signals signals)
+                   (update st :signals signal-patch/append signals)
                    st)))))
 
 
@@ -334,42 +295,18 @@
         :total   chars})))
 
 
-(defn- selector
-  "A CSS selector for the elements of the islands `ids`."
-  [ids]
-  (str/join ", " (map #(str "[id=\"" (island/element-id %) "\"]") ids)))
-
-
-(defn- send-patches!
-  "Sends `patches` (`island/patches`), whose frames are `htmls` and
-  `inserted`, the HTML of each insert's frames: the morphs in one event, an
-  event per insert, and the removals in one. False if the stream closed."
-  [conn {:keys [morph insert] removed :remove} htmls inserted]
-  (and (or (empty? morph) (sse/patch! conn htmls))
-    (reduce (fn [_ [{:keys [mode target]} htmls]]
-              (or (sse/patch! conn htmls {:mode mode :selector (selector [target])})
-                (reduced false)))
-      true
-      (map vector insert inserted))
-    (or (empty? removed) (sse/remove! conn (selector removed)))))
-
-
 (defn- send-frame
   "Sends the frame's patches, and the app's signals with them. Nil if the
   stream closed."
   [{:keys [conn sent latest] :as st}]
-  (let [{:keys [morph insert] :as patches} (island/patches sent latest)
-        htmls    (mapv island/html morph)
-        inserted (mapv #(mapv island/html (:frames %)) insert)
-        patched  (into morph (mapcat :frames) insert)
-        n        (transduce (map count) + (transduce (map count) + htmls) (eduction cat inserted))
-        st       (-> st (update :frames (fnil inc 0)) (update :chars (fnil + 0) n))]
+  (let [{:keys [patches patched chars] :as prepared} (delivery/prepare-frame sent latest)
+        st (-> st (update :frames (fnil inc 0)) (update :chars (fnil + 0) chars))]
     (cond
-      (= patches island/no-patches)
+      (= patches frame/no-patches)
       (assoc st :sent latest)
 
-      (and (send-patches! conn patches htmls inserted)
-        (if-some [signals (patch-signals st patched n)]
+      (and (delivery/send-frame! conn prepared)
+        (if-some [signals (patch-signals st patched chars)]
           (sse/signals! conn signals)
           true))
       (assoc st :sent latest)
@@ -387,17 +324,12 @@
       (subvec declared n))))
 
 
-(defn- script-tag
-  [url]
-  (h/html [:script {:type "module" :src url}]))
-
-
 (defn- send-scripts
   "Sends the scripts the client wasn't, appended to the page's head: Datastar
   gives each tag the page's nonce. Nil if the stream closed."
   [{:keys [conn rt] :as st}]
   (if-some [urls (unsent-scripts st)]
-    (when (sse/patch! conn (mapv script-tag urls) {:mode :append :selector "head"})
+    (when (delivery/send-scripts! conn urls)
       (assoc st :scripts (count (runtime/scripts rt))))
     st))
 
@@ -419,7 +351,7 @@
 
 
 (defn- sync-client
-  "Sends what the attached client lacks (`island/patches`): the scripts its
+  "Sends what the attached client lacks (`frame/patches`): the scripts its
   islands declared, then the topmost changed islands, and the children a list
   gained or lost, or the whole root when what it has is unknown; then the
   signals the islands patched; then a mark, all in one flush. Or a heartbeat,

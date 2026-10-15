@@ -7,7 +7,8 @@ alike.
 ```
 bb dev            # compile the Java, start the demo page with nREPL and Remontoire
 bb dev:readable   # the same, with the app's names readable in the browser, for debugging
-bb test           # compile the Java, run the tests
+bb test           # compile the Java, run the JVM and browser-state tests (Node.js required)
+bb test:browser   # test the embedded cookie/storage JavaScript, with Node.js
 bb test:linux     # the tests in Linux, under JDK 25 in Docker: amd64, arm64, amd64-musl, arm64-musl, or all
 bb lint           # clj-kondo, under the config the jar exports
 bb compile:java   # after changing a .java file
@@ -23,6 +24,15 @@ restart. The JVM also serves [Remontoire](https://github.com/multiplyco/remontoi
 <http://127.0.0.1:7888/mcp>, which Claude Code picks up from `.mcp.json`.
 
 ![The demo page](demo.png)
+
+Frame data and serialization live in `internal.model`; compilation and patch planning in `internal.frame`.
+`internal.delivery` prepares and writes HTML patches, while `session` owns the pump, the flush and its checkpoint.
+`internal.signal-patch` composes pending signal patches without changing their meaning.
+
+The cookie and storage persistence programs are `.js` resources under `resources/co/multiply/tropical`, embedded in
+the page's attributes by `internal.browser-code`. They receive configuration as arguments and run synchronously,
+including before navigation. Use block comments and explicit statement endings in these embedded expressions.
+Reload their Clojure namespaces after editing them; the page revision follows their content.
 
 Open the page in two or three tabs. The footer shows each patch's size next to the full page's, which islands were
 patched, and how often each has rendered. The **Server resources** card shows the subscription registry, across every

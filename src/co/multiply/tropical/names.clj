@@ -32,6 +32,15 @@
   (Boolean/getBoolean "co.multiply.tropical.readable-names"))
 
 
+(defn ^:no-doc digest
+  "The first `n` hex digits of the SHA-256 of `s`. Callers supply their domain prefix."
+  [^String s n]
+  (subs (HexFormat/.formatHex (HexFormat/of)
+          (MessageDigest/.digest (MessageDigest/getInstance "SHA-256")
+            (String/.getBytes s StandardCharsets/UTF_8)))
+    0 n))
+
+
 (defn ^:no-doc opaque
   "What the browser sees of the name `s`: `s` while names are readable, else
   `t` and the first `n` hex digits of a SHA-256 of `s`, which a CSS
@@ -39,6 +48,19 @@
   [^String s n]
   (if readable?
     s
-    (let [digest (MessageDigest/.digest (MessageDigest/getInstance "SHA-256")
-                   (String/.getBytes (str "co.multiply.tropical/" s) StandardCharsets/UTF_8))]
-      (str "t" (subs (HexFormat/.formatHex (HexFormat/of) digest) 0 n)))))
+    (str "t" (digest (str "co.multiply.tropical/" s) n))))
+
+
+(defn ^:no-doc register!
+  "Registers `value` in `!registry` under `browser-name`, allowing redefinition
+  of the same `id` but refusing two definitions whose names collide. `kind`
+  and `named` describe the declaration and its name in a collision's message."
+  [!registry browser-name {:keys [id] :as value} kind named]
+  (swap! !registry
+    (fn [entries]
+      (when-some [other (get entries browser-name)]
+        (when (not= id (:id other))
+          (throw (IllegalArgumentException.
+                   (str kind " " id " would share its " named " with " (:id other) "; rename one.")))))
+      (assoc entries browser-name value)))
+  value)
