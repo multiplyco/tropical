@@ -1541,9 +1541,8 @@ successful-render cost is small; these runs do not support further complexity to
 
 Reviewed the resource registry, signal inbox and subscriptions, island ownership and frame reconciliation, session
 delivery and reconnect handling, Ring page and stream setup, browser state, uploads and compression cleanup. The
-codebase graph predates the internal namespace split and recent Java bookkeeping, so current source was used for
-those paths. The existing ownership boundaries remain useful: the session pump owns mutable island state, frames
-are immutable snapshots, and the registry owns shared resource lifetimes. No architectural rewrite was needed.
+existing ownership boundaries remain useful: the session pump owns mutable island state, frames are immutable
+snapshots, and the registry owns shared resource lifetimes. No architectural rewrite was needed.
 
 Fixed the following failure paths:
 
@@ -1569,8 +1568,8 @@ Fixed the following failure paths:
   repeated report. Their failure bookkeeping now covers throwables while rethrowing the original. If both callbacks
   throw the same exception object, it is no longer added to itself as a suppressed exception.
 
-The new cleanup, page, attach and upload regressions failed against the previous code. The suite now has 189 JVM
-tests with 1,469 assertions and 11 Node tests. All pass, as do lint, formatting and reflection checks. Browser upload
+The new cleanup, page, attach and upload regressions failed against the previous code. Initial validation passed
+189 JVM tests with 1,469 assertions and 11 Node tests, plus lint, formatting and reflection checks. Browser upload
 tests are included in `bb test:browser`, and therefore in `bb test` and the host portion of `bb test:linux`. This pass
 did not run a live-browser smoke test or the Linux containers. No Java source changed.
 
@@ -1589,3 +1588,18 @@ The small cases show about 4–5 ns of added uncontended cost. The 100-subscribe
 observation, not evidence that synchronization improves delivery. This excludes contending emitters, rendering,
 HTTP and browser work; concurrent publishers to the same resource now serialize intentionally. Independent
 resources do not share this monitor. Probe scripts, the baseline source and measurements are in `target/robustness`.
+
+## 2026-10-15 — Robustness review follow-up
+
+The resource regression now runs 1,000 rounds. Independent review measured this variant in fresh JVMs: it caught
+the old race in 19 of 20 runs, while the fixed code failed in none of 22 runs, taking about 390 ms per run. Detection
+is probabilistic: a passing run does not establish that the old race is absent. The additional rounds improve its
+chance of catching a regression at a small cost to the suite.
+
+Release cleanup remains best-effort even for fatal throwables. Its regression now covers a synthetic
+`OutOfMemoryError` as well as an `AssertionError`, through dropping holds, unmounting, disposal and an aborted render,
+and checks that cleanup preserves the render's original exception. The ownership reason is recorded in the design:
+some holds are already outside the instance table, so rethrowing would leave them beyond the pump's later disposal.
+
+Validation after these follow-ups: 189 JVM tests with 6,190 assertions and all 11 Node tests pass, along with lint
+and formatting checks.

@@ -258,12 +258,14 @@
 
 
 (deftest a-throwing-release-does-not-interrupt-ownership-changes
-  (doseq [ending [:drop :unmount :dispose :abort]]
-    (testing (name ending)
+  (doseq [error [(AssertionError. "cleanup failed") (OutOfMemoryError. "cleanup failed")]
+          ending [:drop :unmount :dispose :abort]]
+    (testing (str (name ending) " after " (class error))
       (let [source (atom 0)
             shown (atom true)
             held (atom true)
             released (atom [])
+            render-error (OutOfMemoryError. "abort the render")
             child (island/island-fn "child" nil
                     (fn []
                       (island/use-watch source)
@@ -273,15 +275,16 @@
                             #(hash-map :value k :release
                                (fn []
                                  (swap! released conj k)
-                                 (when (= :broken k) (throw (AssertionError. "cleanup failed"))))))))
-                      (when (= :abort ending) (throw (OutOfMemoryError. "abort the render")))
+                                 (when (= :broken k) (throw error)))))))
+                      (when (= :abort ending) (throw render-error))
                       [:p "child"]))
             root (island/island-fn "root" nil
                    (fn [] [:main (when (island/use-watch shown) (child))]))
             {:keys [step rt]} (harness root)]
         (try
           (if (= :abort ending)
-            (is (thrown? OutOfMemoryError (step)) "cleanup preserves the render's original failure")
+            (is (identical? render-error (try (step) (catch Throwable t t)))
+              "cleanup preserves the render's original failure")
             (do
               (step)
               (case ending

@@ -589,6 +589,10 @@ reading it, learns the app's layout from it.
 
 ## Failures and logging
 
+- **Cleanup keeps going.** A fatal throwable from rendering aborts the frame, but a hold's release logs any throwable
+  and lets the other releases run, as a resource's cleanup does. An unmount has already removed its instance from
+  the table, and an abandoned render's new holds were never installed there. Rethrowing from a release would strand
+  holds that the pump's later disposal cannot find, or replace the render's original failure.
 - **The error view is the app's.** What renders in place of a failed island reaches the client, and an exception's
   message can carry what the user shouldn't see: a query, an id, another service's error. So the default says only
   that a part of the page failed, without naming the island, and an app that wants more, in development, gives its

@@ -506,7 +506,7 @@
                                                :revision         revision
                                                :!marks           !marks}]
                           ((:page app) {:tab tab :frame frame :scripts scripts :request req}))]
-        (when (or (not page) (not (contains? @!marks :stream)))
+        (when-not page
           (session/close! session))
         (when (and page (contains? @!marks :scripts))
           (session/scripts-in-page! session))

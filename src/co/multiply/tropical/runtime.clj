@@ -67,8 +67,10 @@
     (try
       (release)
       (catch Throwable t
-        ;; Cleanup is best-effort, as a resource's undo is: even an assertion
-        ;; must not strand the other holds or replace a render's failure.
+        ;; Cleanup is best-effort even for fatal throwables: an unmount has
+        ;; already removed its instance, and an abandoned render's new holds
+        ;; were never installed. Later disposal cannot recover those holds.
+        ;; Render failures still obey fatal?; cleanup attempts every release.
         (log/warn t "Releasing a hold of island" id "failed.")))))
 
 

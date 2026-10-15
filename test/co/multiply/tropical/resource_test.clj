@@ -230,7 +230,8 @@
 
 (deftest concurrent-emissions-cannot-replace-a-terminal-failure
   (let [fail! @#'resource/fail!]
-    (dotimes [_ 60]
+    ;; Scheduling-sensitive: more rounds improve detection, but do not guarantee it.
+    (dotimes [_ 1000]
       (let [opened (promise)
             fail (promise)
             failed (promise)
