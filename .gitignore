@@ -13,3 +13,7 @@ target/
 
 # The maintainers' own planning: the backlog and a first app's requirements.
 plans/
+
+# The repo's own exported clj-kondo config, which editors copy here from the classpath. The repo lints with the
+# export itself (.clj-kondo/config.edn).
+.clj-kondo/imports/co.multiply/tropical/
