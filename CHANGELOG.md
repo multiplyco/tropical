@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.0 - 2026-10-15
 
 - A page reloads when its stream connects to a server on which what it loaded outside its islands has changed, where
   the tab was rebuilt in place on the page it had: tropical's code in the page, the scripts, whose changed components
