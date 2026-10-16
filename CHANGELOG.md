@@ -10,6 +10,10 @@
   declared `_storageWatch.<token>`. The page doesn't send a value the server already holds, and after a send that
   fails, it sends the next change whatever it is.
 - A cookie value that isn't a boolean, a number or a string reads as the default, for a state without `:valid?` too.
+- `resource/use-summary` gives the open resources, live, for a panel of them: every one on the server, or with
+  `:session`, those the tab's islands read, counting only them. `resource/describe` says what opened a resource, as
+  data: an `observe`'s namespace, position and arguments, or a shared state's instance, where a view had to parse the
+  key's call site.
 
 ## 0.7.0 - 2026-10-15
 

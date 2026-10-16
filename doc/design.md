@@ -133,6 +133,15 @@ and coalescing come from the runtime and the session pump instead, and are cover
   session that reads it. A shared resource doesn't know who reads it, so access control stays at the island, and data
   that differs per user needs the user among the arguments. A one-off query is cached the same way: identical queries
   run once, and the result lives as long as its readers, plus the linger.
+- **A view of the registry, of the server or of one tab.** A debug panel showing what is open was copying the demo's
+  card: reading the registry, and parsing the call site out of each key. `describe` gives a key as data, so the format
+  of a call site stays Tropical's to change. `use-summary` gives the registry live, of the whole server, every user's
+  reads among it, or of what one session's islands hold, which shows nothing the page doesn't read. The session's view
+  takes no bookkeeping: its islands hold the very value cells the registry's entries do, so the session matches its
+  holds against the registry, on its own thread, and renders again as the registry changes, which it does whenever the
+  session gains or drops a read. A view per user, across a user's tabs, was set aside: other sessions' holds are their
+  threads' to read, so it would need the registry to count readers per session, measured at a few hundred
+  nanoseconds more per acquire and release (logbook, 2026-10-16), for a view no panel asked for yet.
 - **The linger.** Without it, every remount (a topic switched back, access granted again, a reconnect) would close and
   reopen a resource, and the churn would land on the database.
 - **Pending is a value, and a read given it waits.** A render reads `pending` and goes on, so the reads after it start

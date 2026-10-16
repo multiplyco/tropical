@@ -341,7 +341,9 @@ plain function returning hiccup, called inside islands.
 
 - `-Dco.multiply.tropical.readable-names=true` shows the app's names in the page instead of digests.
   `(island/element-id path)` maps a path to its digest.
-- `(resource/summary)` lists the open resources, their readers and state.
+- `(resource/summary)` lists the open resources, their readers and state. For a panel of them, an island reads
+  `(resource/use-summary)`, every one on the server, which holds every user's reads, or `(resource/use-summary
+  :session)`, the tab's own. `(resource/describe k)` says what opened one, as data.
 - A failed island is logged with its path, its element id and its reference, which the default view shows the user.
   One failing again the same way keeps its reference; repeat lines are throttled, and recent stack traces are shared
   across instances. A line can name an earlier reference that has its trace. Error-view failures are tracked
@@ -370,6 +372,7 @@ plain function returning hiccup, called inside islands.
 - A task started in a render → belongs to the session, not the island, and outlives it. Use `observe` or
   `use-hold`.
 - A signal name, island id or script URL written by hand → breaks when names are digests. Use the helpers.
+- A resource key's call site parsed, or its shape relied on → breaks when the format changes. Use `resource/describe`.
 - A server value spliced into an expression with `str` → can become code. Use `(ui/json v)`.
 - A placeholder id written by hand, or a binding of the app's own for the page's path → `ring/mount` places the
   root, and `(:request (use-session))` has the path.

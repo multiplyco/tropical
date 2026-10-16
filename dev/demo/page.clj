@@ -11,7 +11,8 @@
   - `messages`:       keyed islands. A new message renders one row; the others are reused.
                       Each tells how long ago it was posted through a web component,
                       `<time-ago>`, a script the rows declare (`script/use`).
-  - `resources-card`: the registry, live: what is open, for whom, and what lingers.
+  - `resources-card`: the registry, live: what is open, for whom, and what lingers,
+                      on the server and in this tab (`resource/use-summary`).
   - `glossary-card`:  one action for every term in a block of raw HTML, passed
                       the clicked term as a value (`use-action`'s `:value`).
                       The definition is an island keyed by its term, which
@@ -387,20 +388,16 @@
 (def ^:private cell [:py-1 :pr-4])
 
 
-(defn- call-site
-  "`demo.page/observe@84:22#1234` as `page.clj:84`."
-  [site]
-  (let [[_ line] (re-find #"@(\d+):" (name site))]
-    (str (last (str/split (namespace site) #"\.")) ".clj" (when line (str ":" line)))))
-
-
 (defn- resource-label
-  "A resource's key: an `observe`'s call site and args, as `page.clj:84 [\"alpha\"]`,
-  or a shared state's instance, as `shared [demo.page/toasts \"…\"]`."
-  [[site & more]]
-  (if (keyword? site)
-    (str (name site) " " (pr-str (vec more)))
-    (str (call-site site) " " (pr-str (first more)))))
+  "A resource, as `resource/describe` has it: an `observe`'s file, line and
+  args, as `page.clj:84 [\"alpha\"]`, or a shared state's instance, as
+  `toasts \"…\"`."
+  [k]
+  (let [{:keys [kind ns line args state key]} (resource/describe k)]
+    (case kind
+      :observe (str (last (str/split (str ns) #"\.")) ".clj" (when line (str ":" line)) " " (pr-str args))
+      :shared (str (name state) " " (pr-str key))
+      (pr-str k))))
 
 
 (defcookie resources-open
@@ -436,9 +433,10 @@
 
 
 (defn- resources-table
-  [entries]
+  "The panel of tab `t`: the resources in `entries`, a `resource/summary`."
+  [t entries]
   [:table (ui/attr {:role "tabpanel" :class [:w-full :text-left :text-sm]}
-            :hidden false (str "!(" (on-tab "registry") ")"))
+            :hidden (not= t "registry") (str "!(" (on-tab t) ")"))
    [:thead
     [:tr {:class muted}
      [:th {:class cell} "Resource"] [:th {:class cell} "State"] [:th {:class cell} "Subscribers"]]]
@@ -460,7 +458,8 @@
   "What the resources card shows, placed only while it is open: hidden, nothing
   reads the registry for it."
   []
-  (let [entries  (use-watch resource/!entries resource/summary)
+  (let [entries  (resource/use-summary)
+        own      (resource/use-summary :session)
         totals   (use-watch resource/!totals)
         sessions (use-watch session/!sessions session/summary)
         actions  (use-watch action/!actions count)
@@ -469,6 +468,7 @@
     [:div {:class [:space-y-3]}
      [:div {:role "tablist" :class [:flex :gap-1]}
       (resources-tab "registry" "Registry")
+      (resources-tab "tab" "This tab")
       (resources-tab "counts" "Counts")]
      [:dl (ui/attr {:role "tabpanel" :class [:grid :grid-cols-2 :gap-x-4 :gap-y-1]}
             :hidden true (str "!(" (on-tab "counts") ")"))
@@ -480,7 +480,8 @@
       (count-row "One-off queries started" (:started queries))
       (count-row "One-off queries completed" (:completed queries))
       (count-row "One-off queries cancelled" (:cancelled queries))]
-     (resources-table entries)]))
+     (resources-table "registry" entries)
+     (resources-table "tab" own)]))
 
 
 (defisland resources-card
@@ -489,9 +490,9 @@
     [:section {:class card}
      [:div {:class [:flex :items-start :justify-between :gap-4]}
       (heading "Server resources"
-        "The resource registry, live, across all sessions, and what else the server holds. The card is patched with "
-        "every change to them; the table and its tabs stay as the browser has them. Hidden, it isn't rendered, and "
-        "reads none of them.")
+        "The resource registry, live, across all sessions, what this tab reads of it, and what else the server "
+        "holds. The card is patched with every change to them; the tables and their tabs stay as the browser has "
+        "them. Hidden, it isn't rendered, and reads none of them.")
       [:button (ui/aria-expanded {:class button :data-on:click (ui/toggle open)} open)
        (fold-label open "Hide" "Show")]]
      [:div (ui/shown open)

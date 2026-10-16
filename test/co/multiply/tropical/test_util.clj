@@ -61,7 +61,9 @@
 (defn entry
   "The registry's summary of the resource `observe-source` opened for `key`."
   [key]
-  (some (fn [[[_ args] summary]] (when (= key (first args)) summary))
+  (some (fn [[k summary]]
+          (let [{:keys [kind args]} (resource/describe k)]
+            (when (and (= :observe kind) (= key (first args))) summary)))
     (resource/summary @resource/!entries)))
 
 

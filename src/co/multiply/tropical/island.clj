@@ -156,6 +156,15 @@
   (:session (current "use-session")))
 
 
+(defn ^:no-doc use-held
+  "A fn of no arguments returning what every island of this session holds, as
+  their last renders left it: the `:value` of each `use-hold`. For a
+  diagnostic's `use-watch` selector, which runs on the session's thread; call
+  it on no other."
+  []
+  (:held (current "use-held")))
+
+
 (defn use-watch
   "The current value of `ref` (anything supporting `add-watch`, or a
   `co.multiply.tropical.signal.Signal`), through `select` if given. The island

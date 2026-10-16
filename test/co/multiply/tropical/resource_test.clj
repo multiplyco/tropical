@@ -1,5 +1,6 @@
 (ns co.multiply.tropical.resource-test
   (:require
+    [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [co.multiply.quiescent :as q]
     [co.multiply.tropical.action :as action :refer [use-action]]
@@ -7,6 +8,7 @@
     [co.multiply.tropical.island :as island :refer [defisland use-watch]]
     [co.multiply.tropical.resource :as resource]
     [co.multiply.tropical.runtime :as runtime]
+    [co.multiply.tropical.shared :as shared :refer [defshared]]
     [co.multiply.tropical.test-util :refer [entry harness manual-source observe-source]])
   (:import
     [java.util.concurrent CountDownLatch LinkedBlockingQueue TimeUnit]))
@@ -331,3 +333,97 @@
           (is (= before (token frame))))
         (runtime/dispose! rt)
         (is (zero? (tokens)))))))
+
+
+;; Watching the registry ---------------------------------------------------------
+
+
+(defisland named-reader
+  {:key (fn [id & _] id)}
+  [_id key subject]
+  [:p (str (observe-source key subject))])
+
+
+(defisland open-view
+  "The resources `use-summary` gives for `scope`, those `names` names, as
+  `name:subscribers:state`."
+  {:key (fn [scope _] (name scope))}
+  [scope names]
+  [:p {:class (str "view-" (name scope))}
+   (str/join " " (sort (keep (fn [[k {:keys [subscribers state]}]]
+                               (when-some [n (names (first (:args (resource/describe k))))]
+                                 (str n ":" subscribers ":" (name state))))
+                         (resource/use-summary scope))))])
+
+
+(defisland tab-root
+  "A tab whose islands read `rows`, `[id key subject]` each, and, given
+  `names`, show both views of what is open."
+  [rows names]
+  [:div (map (fn [[id k s]] (named-reader id k s)) rows)
+   (when names
+     (list (open-view :session names) (open-view :server names)))])
+
+
+(defn- view
+  "What `open-view` of `scope` shows in `html`."
+  [scope html]
+  (second (re-find (re-pattern (str "class=\"view-" (name scope) "\"[^>]*>([^<]*)<")) html)))
+
+
+(deftest a-session-sees-what-its-islands-hold
+  (let [[k1 s1] (manual-source)
+        [k2 s2] (manual-source)
+        [k3 s3] (manual-source)
+        names   {k1 "one" k2 "two" k3 "three"}
+        !a      (atom [["a" k1 s1] ["b" k1 s1] ["c" k2 s2]])
+        tab-a   (harness #(tab-root @!a names) {:tab "a" :uid "alice"})
+        !b      (atom [["d" k2 s2] ["e" k3 s3]])
+        tab-b   (harness #(tab-root @!b nil) {:tab "b" :uid "bob"})]
+    (try
+      ((:step tab-b))
+      (let [html (island/html ((:step tab-a)))]
+        (is (= "one:2:connecting two:1:connecting" (view :session html))
+          "each of its own, counting its own readers, and none of another tab's")
+        (is (= "one:2:connecting three:1:connecting two:2:connecting" (view :server html))
+          "where the server's has every resource, counting every reader"))
+      (testing "another tab's change leaves this tab's view as it was"
+        (reset! !b [["e" k3 s3]])
+        ((:step tab-b))
+        (let [html (island/html ((:step tab-a)))]
+          (is (= "one:2:connecting two:1:connecting" (view :session html)))
+          (is (= "one:2:connecting three:1:connecting two:1:connecting" (view :server html)))))
+      (testing "a resource this tab lets go leaves its view, though it lingers on the server"
+        (reset! !a [["c" k2 s2]])
+        ((:step tab-a))
+        (let [html (island/html ((:step tab-a)))]
+          (is (= "two:1:connecting" (view :session html)))
+          (is (= "one:0:lingering three:1:connecting two:1:connecting" (view :server html)))))
+      (finally
+        (runtime/dispose! (:rt tab-a))
+        (runtime/dispose! (:rt tab-b))))))
+
+
+(defshared described
+  {:init 0})
+
+
+(deftest a-key-is-described-as-data
+  (let [{:keys [step rt]} (harness (island/island-fn "both" nil
+                                     (fn []
+                                       (hooks/observe 1 (fn [emit! n] (emit! n) nil))
+                                       (shared/use-shared described :k)
+                                       [:p "both"])))]
+    (try
+      (step)
+      (let [ds (map resource/describe (keys @resource/!entries))]
+        (is (some #(and (= :observe (:kind %)) (= 'co.multiply.tropical.resource-test (:ns %)) (= [1] (:args %))
+                     (pos-int? (:line %)) (pos-int? (:column %)))
+              ds)
+          "an observe by its namespace, its position, and its args")
+        (is (some #(= {:kind :shared :state `described :key :k} %) ds) "a shared state's instance"))
+      (is (= {:kind :observe :ns 'a.b :args [2]} (resource/describe [(resource/call-site 'a.b nil nil) [2]]))
+        "an observe whose form had no position")
+      (is (= {:kind :other :key [:x]} (resource/describe [:x])))
+      (finally
+        (runtime/dispose! rt)))))

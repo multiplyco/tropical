@@ -19,11 +19,16 @@
   their state's, and change by its `swap!`, not by a subject.
 
   A resource whose task fails is closed: its value becomes `Failed`, so its
-  readers throw, and the next subscriber to its key opens a new one."
+  readers throw, and the next subscriber to its key opens a new one.
+
+  For a view of what is open, `use-summary` gives the registry, live, of the
+  whole server or of what one session's islands hold, and `describe` says
+  what opened each."
   (:require
     [clojure.tools.logging :as log]
     [co.multiply.quiescent :as q]
-    [co.multiply.scoped :as scoped])
+    [co.multiply.scoped :as scoped]
+    [co.multiply.tropical.island :as island])
   (:import
     [co.multiply.tropical.signal Cell]
     [java.util.concurrent.atomic AtomicReference]))
@@ -269,7 +274,86 @@
      entries)))
 
 
+;; Describing ------------------------------------------------------------------
+
+
+(defn ^:no-doc call-site
+  "The site of an `observe` written in `ns` at `line` and `column`, if known:
+  a symbol unique to this call, so two call sites never share a resource,
+  even when a macro's expansions carry no position, and reloaded code opens
+  anew. `describe` reads it back."
+  [ns line column]
+  (symbol (str ns) (str "observe" (when line (str "@" line ":" column)) "#" (gensym ""))))
+
+
+(defn describe
+  "What opened the resource under `key`, as data: for an `observe`,
+  `{:kind :observe, :ns, :line, :column, :args}`, where `:ns` is a symbol,
+  the position its form's, if it had one, and `:args` its arguments; for a
+  shared state's instance (`co.multiply.tropical.shared`), `{:kind :shared,
+  :state, :key}`, where `:state` is the state's qualified symbol. For a key of
+  another shape, `{:kind :other, :key key}`."
+  [key]
+  (let [[site & more] key]
+    (cond
+      ;; `co.multiply.tropical.shared`'s, which requires this namespace.
+      (and (= :co.multiply.tropical.shared/shared site) (= 2 (count more)))
+      {:kind :shared :state (first more) :key (second more)}
+
+      (and (symbol? site) (namespace site) (= 1 (count more)))
+      (let [[_ line column] (re-find #"^observe@(\d+):(\d+)#" (name site))]
+        (cond-> {:kind :observe :ns (symbol (namespace site)) :args (first more)}
+          line (assoc :line (parse-long line) :column (parse-long column))))
+
+      :else
+      {:kind :other :key key})))
+
+
+;; Watching ---------------------------------------------------------------------
+
+
+(defn- held-by
+  "The `summary` of the resources in `entries` whose value is among `held`,
+  values a session's islands hold, each counting the holds among `held`."
+  [entries held]
+  (let [counts (frequencies (filter #(instance? Cell %) held))]
+    (summary (into {}
+               (keep (fn [[k e]]
+                       (when-some [n (get counts (:!value e))]
+                         [k (assoc e :subscribers n)])))
+               entries))))
+
+
+(defn use-summary
+  "The open resources, as `summary` gives them, kept current: the island
+  renders again as one opens, gains or loses a reader, lingers or closes.
+
+  - `:server`, the default: every resource open on this server, each
+    counting every island that reads it, in any session.
+  - `:session`: the resources this session's islands hold, each counting
+    those islands only. A resource the session no longer holds is gone from
+    it, though it may linger for others.
+
+      (let [open (resource/use-summary :session)]
+        [:ul (for [[k {:keys [state subscribers]}] open]
+               [:li (pr-str (resource/describe k)) \" \" (name state) \" \" subscribers])])
+
+  The server's view holds every user's reads, their arguments among them,
+  so show it only to whoever may see them all. The session's view holds what
+  the page already reads. For a diagnostic: it is worked out again over the
+  whole registry each time it changes. A hook: call it during the render."
+  ([]
+   (use-summary :server))
+  ([scope]
+   (case scope
+     :server (island/use-watch !entries summary)
+     :session (let [held (island/use-held)]
+                (island/use-watch !entries #(held-by % (held))))
+     (throw (IllegalArgumentException. (str "use-summary takes :server or :session, not " (pr-str scope) "."))))))
+
+
 (comment
   @!entries
   @!totals
-  (summary @!entries))
+  (summary @!entries)
+  (map describe (keys @!entries)))

@@ -133,10 +133,7 @@
   (let [args   (vec (butlast args+f))
         f      (last args+f)
         {:keys [line column]} (meta &form)
-        ;; Unique to this expansion: two call sites never share, even when a
-        ;; macro's expansions carry no position, and reloaded code opens anew.
-        site   (symbol (str (ns-name *ns*))
-                 (str "observe" (when line (str "@" line ":" column)) "#" (gensym "")))
+        site   (resource/call-site (ns-name *ns*) line column)
         locals (captured &env f)]
     (when (seq locals)
       (throw (ex-info (str "observe's fn refers to " (str/join ", " locals) ", local to the render. "

@@ -188,6 +188,16 @@
         (throw t)))))
 
 
+(defn- held-values
+  "What every island of `rt` holds, as their last renders left it. On the
+  session's thread only, which owns the instances."
+  [rt]
+  (into []
+    (comp (mapcat (fn [^Instance inst] (vals (.-holds inst))))
+      (map :value))
+    (vals @(:!instances rt))))
+
+
 (defn- render-hooks
   "The hooks of one render, recording what it holds, reads and declares."
   [rt ^Instance inst !holds reads !signals]
@@ -210,6 +220,7 @@
      :declare! (fn [path value]
                  (vswap! !signals assoc-in path value)
                  nil)
+     :held     (fn [] (held-values rt))
      :signals! (fn [signals]
                  (when-not (map? signals)
                    (throw (IllegalArgumentException.

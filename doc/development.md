@@ -102,9 +102,10 @@ session.
 14. **Notify.** "Notify my tabs" shows a toast in every tab of yours, for 6 s, a state shared on the server per user.
    "Another topic" posts one before it opens the page, and the page it opens shows it. The Server resources table
    lists the toasts' instance with a subscriber per tab.
-15. **Switch tabs.** The Server resources card's Registry and Counts tabs switch in the browser, on a local signal, and
-   stay as you left them while the card is patched with every change to the registry. Post is enabled while the
-   message has text, from the first paint (`ui/attr`).
+15. **Switch tabs.** The Server resources card's Registry, This tab and Counts tabs switch in the browser, on a local
+   signal, and stay as you left them while the card is patched with every change to the registry. Registry is every
+   resource open on the server, and This tab the ones this tab's islands read, with its own readers
+   (`resource/use-summary`). Post is enabled while the message has text, from the first paint (`ui/attr`).
 16. **Suggest.** Suggest answers at once, and a moment later its suggestion lands in the message, sent from a background
    task (`use-patch-signals`). Type over it: the composer renders again as the suggestion lands, or as you suggest
    again, and leaves what you typed until the next one arrives.
