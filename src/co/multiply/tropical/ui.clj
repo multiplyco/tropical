@@ -6,7 +6,8 @@
   keeps it decides what the server knows of it:
 
   - `co.multiply.tropical.cookie`: small values, which every request carries,
-    so the server renders them in the first frame. Whether a section is open,
+    so the server renders them in the first frame, and follows them as they
+    change where it reads them (`cookie/observe`). Whether a section is open,
     a sidebar folded, a pane's width.
   - `co.multiply.tropical.storage`: values of any size, in `localStorage`,
     which the server sees only when an action passes them, or it reads them
@@ -25,6 +26,7 @@
   (:require
     [clojure.string :as str]
     [co.multiply.tropical.cookie :as cookie]
+    [co.multiply.tropical.internal.browser-state :as browser-state]
     [co.multiply.tropical.island :as island]
     [co.multiply.tropical.page :as page]
     [co.multiply.tropical.storage :as storage]
@@ -159,13 +161,13 @@
 
 (defn page-attrs
   "Attributes for the page's body, which keep the state the browser owns: a
-  handler for each change to a cookie state, which it writes into the cookie,
-  or a storage state, which it writes into `localStorage`, and a pass as the
-  page starts, dropping the entries it won't use. And they refuse files
-  dropped outside a drop area, which the browser would open in the tab
-  (`co.multiply.tropical.upload/drop-guard`). `ring/mount` adds them to the
-  element the app mounts in. For a body of the page's own, given its own
-  attributes, they are added to them:
+  handler for each change to a cookie state or a storage state, which it
+  writes into the cookie or `localStorage`, and sends to the islands reading
+  it (`observe`), and a pass as the page starts, dropping the entries it
+  won't use. And they refuse files dropped outside a drop area, which the
+  browser would open in the tab (`co.multiply.tropical.upload/drop-guard`).
+  `ring/mount` adds them to the element the app mounts in. For a body of the
+  page's own, given its own attributes, they are added to them:
 
       [:body (ui/page-attrs {:data-init (ring/stream-init tab)}) ...]
 
@@ -183,8 +185,9 @@
    ;; strings and an arrow function that takes no arguments, called with none,
    ;; and returns the last. `patch` is the handler's own. It starts with `void`:
    ;; Datastar takes an expression starting with an arrow function for one.
-   (let [own (merge {:data-on-signal-patch        (str "void (() => {" (cookie/handler-js) (storage/handler-js) "})()")
-                     :data-on-signal-patch-filter "{include: /^_(cookie|storage|storageForget|storageWatch)\\./}"
+   (let [own (merge {:data-on-signal-patch        (str "void (() => {" (cookie/handler-js) (storage/handler-js)
+                                                    (browser-state/watch-js) "})()")
+                     :data-on-signal-patch-filter "{include: /^_(cookie|storage|storageForget|watch)\\./}"
                      ;; Reads no signal, so it runs once.
                      :data-effect                 (storage/prune-js)}
                (upload/drop-guard))]

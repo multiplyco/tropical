@@ -191,7 +191,7 @@ plain function returning hiccup, called inside islands.
 |----------------------------------------|----------------------------------|----------------------------------------|--------------------------------|
 | An island's own, server-side           | `use-state`                      | while the island is mounted            | yes                            |
 | The page's own, browser-side           | a Datastar signal (`data-signals`) | until the page unloads               | when an action sends it        |
-| The browser's, rendered in first frame | `defcookie` + `use-cookie`       | across page loads, in a cookie         | as the session starts          |
+| The browser's, rendered in first frame | `defcookie` + `use-cookie`       | across page loads, in a cookie         | at start; `observe` follows it |
 | The browser's, any size                | `defstorage` + `use-storage`     | across page loads, in `localStorage`   | when an action passes it       |
 | Shared across sessions                 | `defshared` + `use-shared`       | while read, then a linger; in memory   | yes                            |
 | Durable, or across servers             | a database, read with `observe`  | the database's                         | yes                            |
@@ -199,6 +199,10 @@ plain function returning hiccup, called inside islands.
 - **Cookie states** (`co.multiply.tropical.cookie`) are for what the first frame must render right, such as whether a
   section is open: booleans, numbers and strings, about 3.5 KB in all. `ui/shown`, `ui/aria-expanded` and `ui/toggle`
   take the handle. An action sets one with `(cookie/patch [[state item value]])`.
+- **`ui/shown` only hides.** The server goes on rendering what a folded panel, group or tab holds, and the islands in it
+  go on reading and patching. For what is costly to keep live, place it from the page's value:
+  `[:div (ui/shown open) (when (cookie/observe open) (panel-body))]`. `cookie/value` is the session's value, fixed
+  for its life; `cookie/observe` follows the tab, and the content arrives a round trip after the panel opens.
 - **Storage states** (`co.multiply.tropical.storage`) are for drafts: JSON, kept per user, dropped by age. The server
   stores none of it and the first frame renders the default; bindings show the browser's value. An action takes it as
   its `:value` (`(ui/signal handle)`) and reads it with `storage/decode`. `storage/observe` reads it for what only the
@@ -357,6 +361,7 @@ plain function returning hiccup, called inside islands.
 - A helper with hooks called twice in one island → repeated keys. Make it an island.
 - Every small component an island → memory per session. Presentational pieces stay functions.
 - A text input in an island that reads something that ticks → typing is morphed away. Split the island.
+- Live content under `ui/shown` → rendered and read while folded. Place it with `cookie/observe`.
 - A list's rows wrapped in elements, or a count in the list's island → every change resends the list.
 - A script drawing into an island's elements → undone by the next render.
 - A positional action key (`[:pick i]`) → a stale click runs the new handler. Key by the subject.

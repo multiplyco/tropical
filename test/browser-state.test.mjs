@@ -3,7 +3,7 @@ import {readFileSync} from 'node:fs'
 import test from 'node:test'
 import vm from 'node:vm'
 
-const programs = Object.fromEntries(['cookie-keep', 'storage-keep', 'storage-prune'].map(name =>
+const programs = Object.fromEntries(['cookie-keep', 'storage-keep', 'storage-prune', 'watch'].map(name =>
   [name, readFileSync(new URL(`../resources/co/multiply/tropical/${name}.js`, import.meta.url), 'utf8')]))
 
 class Storage {
@@ -34,7 +34,7 @@ function browser() {
       requests.push({url, ...options})
       return context.response
     },
-    response: {status: 204, headers: new Map()},
+    response: {status: 204, ok: true, headers: new Map()},
     CustomEvent: class { constructor(type) { this.type = type } },
     dispatchEvent: event => events.push(event.type),
   })
@@ -55,6 +55,8 @@ function browser() {
 const config = {owner: 'alice', states: {draft: [1, 500]}, prefix: 'tropical:', globalName: 'storageForTest'}
 const key = (signal = 'draft', item = '_', owner = 'alice') => 'tropical:' + JSON.stringify([owner, signal, item])
 const entry = (value, at = 900, version = 1) => JSON.stringify({version, at, value})
+const watchConfig = {globalName: 'watchForTest'}
+const draftWatch = () => [['_storage', 'draft', '_'], 300]
 
 test('cookies merge other tabs, discard removed states, and keep false', () => {
   const b = browser()
@@ -100,43 +102,87 @@ test('quota eviction removes the oldest owned entry and keeps unrelated data', (
 })
 
 test('observations coalesce, read the latest value, and revoke gone tokens', async () => {
-  const b = browser(), signals = {_storage: {draft: {_: 'first'}}, _storageWatch: {token: ['draft', '_']}}
-  b.run('storage-keep', signals, {_storageWatch: signals._storageWatch}, config)
+  const b = browser(), signals = {_storage: {draft: {_: 'first'}}, _watch: {token: draftWatch()}}
+  b.run('watch', signals, {_watch: signals._watch}, watchConfig)
   assert.equal([...b.timers.values()][0].ms, 0)
   for (const value of ['second', false]) {
     signals._storage.draft._ = value
-    b.run('storage-keep', signals, {_storage: signals._storage}, config)
+    b.run('watch', signals, {_storage: signals._storage}, watchConfig)
   }
   assert.equal(b.timers.size, 1)
   assert.equal([...b.timers.values()][0].ms, 300)
-  b.context.response = {status: 404, headers: new Map()}
+  b.context.response = {status: 404, ok: false, headers: new Map()}
   await b.tick()
   assert.equal(b.requests.length, 1)
   assert.equal(b.requests[0].headers['Tropical-Action'], 'token')
   assert.deepEqual(JSON.parse(b.requests[0].body), {value: false})
-  assert.equal(signals._storageWatch.token, null)
+  assert.equal(signals._watch.token, null)
 })
 
 test('an observation on another server asks the page to reopen', async () => {
-  const b = browser(), signals = {_storageWatch: {token: ['draft', '_']}}
-  b.context.response = {status: 409, headers: new Map([['Tropical-Reopen', 'true']])}
-  b.run('storage-keep', signals, {_storageWatch: signals._storageWatch}, config)
+  const b = browser(), signals = {_watch: {token: draftWatch()}}
+  b.context.response = {status: 409, ok: false, headers: new Map([['Tropical-Reopen', 'true']])}
+  b.run('watch', signals, {_watch: signals._watch}, watchConfig)
   await b.tick()
   assert.deepEqual(b.events, ['tropical:reopen'])
   assert.deepEqual(JSON.parse(b.requests[0].body), {value: null})
 })
 
 test('forget removes storage and restores the default before navigation', async () => {
-  const b = browser(), signals = {_storage: {draft: {_: 'edited'}}, _storageWatch: {token: ['draft', '_']}}
-  b.context[config.globalName] = {defaults: {[key()]: JSON.stringify('initial')}, timers: {}}
+  const b = browser(), signals = {_storage: {draft: {_: 'edited'}}, _watch: {token: draftWatch()}}
+  const patch = {_storage: {draft: {_: 'edited'}}, _storageForget: {draft: {_: true}}}
+  b.context[config.globalName] = {defaults: {[key()]: JSON.stringify('initial')}}
   b.localStorage.setItem(key(), entry('edited'))
-  b.run('storage-keep', signals, {_storageForget: {draft: {_: true}}}, config)
+  b.run('storage-keep', signals, patch, config)
+  b.run('watch', signals, patch, watchConfig)
   assert.equal(b.localStorage.getItem(key()), null)
   assert.equal(signals._storage.draft._, 'initial')
   assert.equal(signals._storageForget, null)
-  assert.equal([...b.timers.values()][0].ms, 0)
+  assert.equal([...b.timers.values()][0].ms, 0, 'at once, though the patch changed the entry too')
   await b.tick()
   assert.deepEqual(JSON.parse(b.requests[0].body), {value: 'initial'})
+})
+
+test('a cookie observation sends at once, and only what the server does not hold', async () => {
+  const b = browser(), signals = {_cookie: {open: true}, _watch: {token: [['_cookie', 'open'], 0, true]}}
+  const change = value => {
+    signals._cookie.open = value
+    b.run('watch', signals, {_cookie: {open: value}}, watchConfig)
+  }
+  b.run('watch', signals, {_cookie: signals._cookie, _watch: signals._watch}, watchConfig)
+  await b.tick()
+  assert.equal(b.requests.length, 0, 'the server rendered the value the page holds')
+  change(false)
+  assert.equal([...b.timers.values()][0].ms, 0)
+  await b.tick()
+  assert.deepEqual(JSON.parse(b.requests[0].body), {value: false})
+  change(false)
+  await b.tick()
+  assert.equal(b.requests.length, 1, 'nor what it was last sent')
+  change(true)
+  await b.tick()
+  assert.deepEqual(JSON.parse(b.requests[1].body), {value: true})
+})
+
+test('a cookie observation of a page that has moved on sends its value as it appears', async () => {
+  const b = browser(), signals = {_cookie: {open: {a: false, b: true}}, _watch: {token: [['_cookie', 'open', 'a'], 0, true]}}
+  b.run('watch', signals, {_watch: signals._watch}, watchConfig)
+  await b.tick()
+  assert.deepEqual(JSON.parse(b.requests[0].body), {value: false})
+  b.run('watch', signals, {_cookie: {open: {b: false}}}, watchConfig)
+  assert.equal(b.timers.size, 0, 'another item is another watch\'s')
+})
+
+test('a value whose send failed is sent again', async () => {
+  const b = browser(), signals = {_cookie: {open: false}, _watch: {token: [['_cookie', 'open'], 0, true]}}
+  b.context.response = {status: 503, ok: false, headers: new Map()}
+  b.run('watch', signals, {_cookie: {open: false}}, watchConfig)
+  await b.tick()
+  b.context.response = {status: 204, ok: true, headers: new Map()}
+  b.run('watch', signals, {_cookie: {open: false}}, watchConfig)
+  await b.tick()
+  assert.equal(b.requests.length, 2)
+  assert.deepEqual(JSON.parse(b.requests[1].body), {value: false})
 })
 
 test('pruning checks owner, age, version and declaration while preserving other apps', () => {

@@ -1,7 +1,11 @@
 (ns ^:no-doc co.multiply.tropical.internal.browser-state
-  "Naming and declaration invariants shared by browser-owned states."
+  "Naming and declaration invariants shared by browser-owned states, and the
+  watch both stores' `observe` reads the page's value through."
   (:require
     [clojure.string :as str]
+    [co.multiply.tropical.action :as action]
+    [co.multiply.tropical.internal.browser-code :as browser-code]
+    [co.multiply.tropical.island :as island]
     [co.multiply.tropical.names :as names]))
 
 
@@ -33,3 +37,42 @@
       (throw (IllegalArgumentException.
                (str kind " state " (:id state) " is used " (if item "with an item and without" "without an item and with")
                  "; use it one way."))))))
+
+
+(defn observe
+  "The value the page sends of its signal at `path`, a vector of names, for
+  the stores' `observe`: `value` until it sends one, then the latest, through
+  `read`, a fn of the JSON it sent. The island renders again when it changes.
+
+  A hold under `k`, idempotent, mints a token bound to the session's user, as
+  an action's, and the island's root declares the watch the body's handler
+  sends to (`watch.js`), `_watch.<token>`: `[path ms]`, or with `known?`,
+  `[path ms value]`, where the server renders the page's signal as `value`,
+  and the page sends it only once it holds another. The handler sends as the
+  watch appears, and `ms` after each change. Once the island stops reading,
+  the token is revoked, and the next send's 404 drops the watch."
+  [k path {:keys [ms read value known?]}]
+  (let [{:keys [uid tab]} (island/use-session)
+        {:keys [token !value !handler]}
+        (island/use-hold k
+          (fn []
+            (let [minted (action/mint uid tab)]
+              (update minted :value assoc :!value (atom value))))
+          {:idempotent true})]
+    (reset! !handler (fn [body]
+                       (reset! !value (read (get body "value")))
+                       nil))
+    (island/declare-signal ["_watch" token] (cond-> [path ms] known? (conj value)))
+    (island/use-watch !value)))
+
+
+(def ^:private watch-program
+  (browser-code/program "watch.js"))
+
+
+(defn watch-js
+  "The statements of the body's signal-patch handler (`ui/page-attrs`) that
+  send each watched value to its `observe`: as its watch appears, and after
+  each change."
+  []
+  (browser-code/call watch-program ["$" "patch" (island/json-js {:globalName "__tropicalWatch"})]))

@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- `cookie/observe` reads the page's value of a cookie state, for an island that renders from it: the session's value
+  in the first frame, then the page's, sent as it changes, while the island reads it. A panel, group or tab can place
+  its content only while it is open, where `ui/shown` hides content that the server goes on rendering, and whose
+  islands go on reading.
+- Both stores' `observe` send through one program in the page, and declare `_watch.<token>` where `storage/observe`
+  declared `_storageWatch.<token>`. The page doesn't send a value the server already holds, and after a send that
+  fails, it sends the next change whatever it is.
+- A cookie value that isn't a boolean, a number or a string reads as the default, for a state without `:valid?` too.
+
 ## 0.7.0 - 2026-10-15
 
 - A `use-watch` whose selector throws keeps its subscription, retries when the source changes, and releases the

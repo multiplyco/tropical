@@ -52,8 +52,9 @@ boundaries.
   - `(use-shared state key)` (`co.multiply.tropical.shared`) reads state the server keeps for every island reading it
     with that key, across sessions: [State shared on the server](shared-state.md).
   - `(use-cookie state)` (`co.multiply.tropical.cookie`) and `(use-storage state)` (`co.multiply.tropical.storage`)
-    take up state the browser owns, kept in a cookie or in its storage, and `(storage/observe handle)` reads the
-    browser's value of the latter: [State the browser owns](browser-state.md).
+    take up state the browser owns, kept in a cookie or in its storage, and `(cookie/observe handle)` and
+    `(storage/observe handle)` read the page's value, for what the server renders from it:
+    [State the browser owns](browser-state.md).
   - `(use-session)` returns the session's `{:tab :uid :request}`: its tab, its user, and the request that created it,
     for what every island may need from the page's request, such as its path, `(-> (use-session) :request :uri)`
     ([Many pages](serving.md#many-pages)).

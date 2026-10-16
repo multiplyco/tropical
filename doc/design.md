@@ -397,6 +397,11 @@ of the default. A draft the user is writing is large, and the server needn't ren
   `data-signals__ifmissing`, which Datastar applies per leaf. So whichever renders first declares it, and a later
   declaration, a remount or a patch carrying the stale copy changes nothing: no island owns the state, and none has to
   come first.
+- **One watch for both stores.** An `observe` of either declares `_watch.<token>`: the path of the signal it reads,
+  how long to wait after a change, and for a cookie state, the value the server rendered. One program in the body's
+  handler sends to every watch, as it appears and after each change, and only a value other than the one the server
+  holds: what it was last sent, or what it rendered. After a send that fails, the next change is sent, whatever it is.
+  One program for both keeps a single copy of the send, the reopen and the revocation, in the code and in the page.
 
 ### In a cookie
 
@@ -407,11 +412,22 @@ of the default. A draft the user is writing is large, and the server needn't ren
   browser keeps. It is an arrow function taking no arguments, called with none: Datastar splits an expression that
   returns a value into statements at each `;` outside strings and such a function, and returns the last, so any other
   shape is cut apart and fails to compile (logbook, 2026-10-08).
-- **The cookie is the client's.** A value that isn't valid for its state reads as the default. Values are booleans,
-  numbers and strings.
+- **The cookie is the client's.** A value that isn't valid for its state, or isn't a boolean, a number or a string,
+  reads as the default, whether the cookie holds it or `observe` is sent it.
 - **An action sets a state as a signal.** A handler returns a state's signals (`patch`), checked as it builds them:
   the islands using the state follow, and the body's handler keeps it, as it keeps the browser's own changes. That
   covers an item the page doesn't render too, whose signal the patch creates.
+- **Read on request, from the session's value.** `ui/shown` hides what the server goes on rendering, and the reads in
+  it stay open: a sidebar of live lists, folded, costs what it costs open. `observe` reads the page's value, so an
+  island places what the element holds only while it is shown. It reads as the session's value until the page sends
+  another, so the first frame has it and waits for nothing, and the watch carries that value, so a page that holds it
+  sends nothing. The page sends a change at once, where storage waits for the typing to stop: a toggle is one change.
+  It follows the page's signal, not the cookie, which every tab shares: each session renders what its own tab shows.
+  Opening costs a round trip before the content shows, which is why hiding stays the default. Rejected: an option on
+  `defcookie` that kept `value` current. Whether the server follows a state is the reader's need, not the state's:
+  the island with a panel's toggle only binds it, and only the one placing the content reads it, so a page would have
+  sent every change of the state for any island using it. And `value` would have been a read under one declaration and
+  a constant under another, with nothing at the call site to tell.
 - **For the page an action opens, signals ahead of the navigation.** A handler that opens a page with a state chosen
   for it, such as a new item's, or that uses up a draft, has its store written before that page loads. Signals patched
   over the session's stream would race the action's answer, which opens the page; so the answer carries both, as
@@ -435,13 +451,13 @@ of the default. A draft the user is writing is large, and the server needn't ren
   version and young enough, else the default. Datastar applies it per leaf, which for a map would bring back a key the
   user removed from a stale copy; but the copy it reads is the browser's own entry, the signal's mirror, which has no
   such key. A server's copy would bring the key back, which is why maps in a cookie state are parked.
-- **Shown by bindings, read on request.** The first frame renders the default: no request carries `localStorage`, so
-  the server can't render the browser's value before the page's script runs. Most of what shows a draft is a binding,
-  which needs no server. What only the server can render from it, a row per item or a count, reads it with `observe`:
-  a hold that mints a token bound to the user, as an action's is, and declares `_storageWatch.<token>` naming the
-  entry. The handler sends the entry to the token as the watch appears, and a moment after each change. When the
-  island stops reading, the token is revoked, and the next send's 404 drops the watch. Its `pending` isn't a
-  resource's, so the first frame doesn't wait for it: the browser can't answer before it has the page.
+- **Shown by bindings, read on request.** The first frame renders the default: no request carries `localStorage`, so the
+  server can't render the browser's value before the page's script runs. Most of what shows a draft is a binding, which
+  needs no server. What only the server can render from it, a row per item or a count, reads it with `observe`: a hold
+  that mints a token bound to the user, as an action's is, and declares `_watch.<token>` naming the entry. The handler
+  sends the entry to the token as the watch appears, and a moment after each change. When the island stops reading, the
+  token is revoked, and the next send's 404 drops the watch. Its `pending` isn't a resource's, so the first frame
+  doesn't wait for it: the browser can't answer before it has the page.
 - **Forgetting is a signal of its own.** Datastar deletes a signal patched to null without the patch event a handler
   hears (logbook, 2026-10-09). So `forget` patches `_storageForget`, which the body's handler hears whether or not
   anything on the page uses the entry: it drops the entry, sets a declared value back to its default, and clears the

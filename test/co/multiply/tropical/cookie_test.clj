@@ -183,3 +183,103 @@
   (is (thrown? IllegalArgumentException (cookie/patch [[group-open "v1.2" false]]))
     "Datastar would read it as a step into the signal")
   (is (str/includes? (render #(group "a.b") nil) "failed to render")))
+
+
+(defisland placed
+  [reads?]
+  (let [open (cookie/use-cookie panel-open)]
+    [:section
+     [:button (ui/aria-expanded {:data-on:click (ui/toggle open)} open) "Panel"]
+     [:div (ui/shown open) (when (and reads? (cookie/observe open)) "content")]]))
+
+
+(defn- watch
+  "The token and the watch the root of `html` declares."
+  [html]
+  (first (get (declared html) "_watch")))
+
+
+(defisland labelled
+  []
+  [:p (cookie/observe (cookie/use-cookie label))])
+
+
+(deftest a-value-is-a-boolean-a-number-or-a-string
+  (testing "for a state that takes any value, too"
+    (is (= {(:signal label) "none"} (get (declared (render labelled {(:signal label) {"a" 1}})) "_cookie"))
+      "in the cookie")
+    (let [{:keys [step rt]} (harness labelled)]
+      (try
+        (let [[token] (watch (island/html (step)))]
+          (action/invoke! token "user" {"value" "x"})
+          (is (str/includes? (island/html (step)) ">x<"))
+          (action/invoke! token "user" {"value" {"a" 1}})
+          (is (str/includes? (island/html (step)) ">none<") "or sent by the page"))
+        (finally
+          (runtime/dispose! rt))))))
+
+
+(deftest the-server-follows-the-page-s-value
+  (let [!reads (atom true)
+        {:keys [step rt]} (harness #(placed @!reads))]
+    (try
+      (scoping [cookie/*cookie* (delay {panel-signal false})]
+        (let [html          (island/html (step))
+              [token watch] (watch html)
+              send!         #(action/invoke! token "user" {"value" %})]
+          (is (not (str/includes? html "content")) "the session's value, in the first frame")
+          (is (not (runtime/pending? rt)) "which waits for nothing")
+          (is (= [["_cookie" panel-signal] 0 false] watch) "the page sends another, at once")
+          (is (= [:forbidden] (action/invoke! token "someone else" {"value" true})) "the user's own")
+          (send! true)
+          (is (str/includes? (island/html (step)) "content"))
+          (send! false)
+          (is (not (str/includes? (island/html (step)) "content")))
+          (send! 1)
+          (is (str/includes? (island/html (step)) "content") "an invalid value reads as the default")
+          (send! false)
+          (step)
+          (send! nil)
+          (is (str/includes? (island/html (step)) "content") "as does none")
+          (reset! !reads false)
+          (step)
+          (is (= [:gone] (send! false)) "revoked once nothing reads it")))
+      (finally
+        (runtime/dispose! rt)))))
+
+
+(defisland group-placed
+  {:key identity}
+  [id]
+  (let [open (cookie/use-cookie group-open id)]
+    [:li (when (cookie/observe open) (str "group " id))]))
+
+
+(defisland groups-placed
+  []
+  [:ul (map group-placed [1 2])])
+
+
+(defn- watches
+  "Every watch the islands in `html` declare, by the path it watches, with its
+  token."
+  [html]
+  (into {}
+    (comp (map #(json/parse (str/replace (second %) "&quot;" "\"")))
+      (mapcat #(get % "_watch"))
+      (map (fn [[token [path]]] [path token])))
+    (re-seq #"data-signals__ifmissing=\"([^\"]*)\"" html)))
+
+
+(deftest a-state-per-item-is-followed-per-item
+  (let [{:keys [step rt]} (harness groups-placed)]
+    (try
+      (let [html (island/html (step))]
+        (is (str/includes? html "group 1"))
+        (is (str/includes? html "group 2"))
+        (action/invoke! (get (watches html) ["_cookie" group-signal "1"]) "user" {"value" false})
+        (let [html (island/html (step))]
+          (is (not (str/includes? html "group 1")))
+          (is (str/includes? html "group 2"))))
+      (finally
+        (runtime/dispose! rt)))))

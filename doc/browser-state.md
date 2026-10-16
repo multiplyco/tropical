@@ -7,7 +7,8 @@ what the server knows of it, so each store has a namespace of its own:
 |--------------------|------------------------------------------------------|------------------------------------------------------|
 | For                | whether a section is open, a sidebar folded          | a draft the user is writing                          |
 | Kept in            | a cookie                                             | `localStorage`                                       |
-| The server sees it | as the session begins, so it renders the first frame | when an action passes it, or it reads it (`observe`) |
+| The server sees it | as the session begins, so it renders the first frame | when an action passes it, or an island reads it      |
+| An island reads it | from the first frame on, as it changes (`observe`)   | after the first frame, as it changes (`observe`)     |
 | Values             | booleans, numbers and strings, about 3.5 KB in all   | JSON, of any size                                    |
 | Sent               | with every request                                   | only as an action's value                            |
 | Per user           | no                                                   | yes                                                  |
@@ -40,9 +41,26 @@ whose handler writes each change into the store ([Serving pages](serving.md)).
 - **Right in the first frame.** The server reads the cookie of the request that created the session, validated per
   state. `ui/shown` and `ui/aria-expanded` render the plain attribute from it, and bind it to the signal; `ui/signal`
   gives the signal for expressions of your own, such as a pane's width in `data-style`. `cookie/value` is the session's
-  value, for the first paint only: the browser's may have moved on, so bind what must follow it.
+  value, for the first paint only: the browser's may have moved on, so bind what must follow it, or read it with
+  `cookie/observe`.
 - **Kept whole across tabs.** The body's handler writes each change into the cookie, merged, so tabs don't undo one
   another. It keeps only values other than their default, and stays under 4 KB.
+- **Followed by the server where it renders from it.** `ui/shown` only hides: the server goes on rendering what the
+  element holds, and the islands in it go on reading. `(cookie/observe open)` is the page's value, for an island that
+  places it only while it is shown:
+
+  ```clojure
+  (let [open (use-cookie resources-open)]
+    [:section
+     [:button (ui/aria-expanded {:data-on:click (ui/toggle open)} open) "Resources"]
+     [:div (ui/shown open)
+      (when (cookie/observe open) (resource-list))]])
+  ```
+
+  It is the session's value in the first frame, then the page's, which the browser sends as it changes, while the
+  island reads it. A folded panel then reads nothing, and costs the server nothing. Shown again, the element shows at
+  once, and its content a round trip later, so keep what is cheap to keep live under `ui/shown` alone. It follows each
+  tab's own value: tabs share the cookie, but each session renders what its tab shows.
 - **Set by an action.** A handler returns `(cookie/patch [[group-open id false]])`, merged with its own signals: the
   islands using the state follow, and the cookie keeps it, for an item the page doesn't render too. For the page it
   opens, such as a new item's with a choice made before the item existed, it passes the same signals to `navigate`:

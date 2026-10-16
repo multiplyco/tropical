@@ -52,10 +52,11 @@ changing these Java classes, just as for the signal and stream primitives.
 an instance's failure reference and counters; `runtime.TraceCache` belongs to the island definition and shares recent
 traces across instances. `internal.failure` logs their decisions through tools.logging.
 
-The cookie and storage persistence programs are `.js` resources under `resources/co/multiply/tropical`, embedded in
-the page's attributes by `internal.browser-code`. They receive configuration as arguments and run synchronously,
-including before navigation. Use block comments and explicit statement endings in these embedded expressions.
-Reload their Clojure namespaces after editing them; the page revision follows their content.
+The cookie and storage persistence programs, and the one sending values to `observe` (`watch.js`), are `.js`
+resources under `resources/co/multiply/tropical`, embedded in the page's attributes by `internal.browser-code`. They
+receive configuration as arguments and run synchronously, including before navigation. Use block comments and explicit
+statement endings in these embedded expressions. Reload their Clojure namespaces after editing them; the page revision
+follows their content.
 
 Open the page in two or three tabs. The footer shows each patch's size next to the full page's, which islands were
 patched, and how often each has rendered. The **Server resources** card shows the subscription registry, across every
@@ -80,9 +81,11 @@ session.
 8. **Arrive cold.** The pages wait up to 150 ms for their first frame's reads (`:first-frame-ms`). With no tab on alpha
    for 20 s, load `/topic/alpha`: its feed connects in 50 ms, so the page arrives with a reading, while the 700 ms
    summary arrives over the stream.
-9. **Fold away.** The Server resources table and the vault's messages fold away, and stay as you left them: through
-   the card's constant patches, across a reload, and when the panel mounts again after Revoke and Grant. The state is
-   the browser's, in signals kept in a cookie, and the server renders it in the first frame (`defcookie`).
+9. **Fold away.** The Server resources table and the vault's messages fold away, and stay as you left them: across a
+   reload, and when the panel mounts again after Revoke and Grant. The state is the browser's, in signals kept in a
+   cookie, and the server renders it in the first frame (`defcookie`). The hidden resources card isn't patched: the
+   server follows its state, and places the table and its tabs only while they are shown (`cookie/observe`). Show it,
+   and they arrive a round trip later.
 10. **Leave.** "Another topic" is an action that picks a topic on the server and opens its page. The topic route refuses
    a topic that doesn't exist: on `/topic/gamma`, remove it from the REPL,
    `(alter-var-root #'demo.state/topics dissoc "gamma")`, and close the sessions. The tab's stream reconnects, is

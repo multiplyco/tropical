@@ -35,6 +35,8 @@
 
   The resources table and the vault's messages fold away, as state the browser
   owns and the server renders, kept in a cookie (`co.multiply.tropical.cookie`).
+  The resources card's body is placed only while the card is open, so a hidden
+  card reads nothing (`cookie/observe`).
   The resources card's tabs switch in the browser, on a local signal, and the
   composer's Post button is enabled while there is something to post:
   attributes following an expression from the first paint (`ui/attr`). Its
@@ -454,37 +456,46 @@
          [:td {:class cell} subscribers]]))]])
 
 
-(defisland resources-card
+(defisland resources-body
+  "What the resources card shows, placed only while it is open: hidden, nothing
+  reads the registry for it."
   []
-  (let [open     (cookie/use-cookie resources-open)
-        entries  (use-watch resource/!entries resource/summary)
+  (let [entries  (use-watch resource/!entries resource/summary)
         totals   (use-watch resource/!totals)
         sessions (use-watch session/!sessions session/summary)
         actions  (use-watch action/!actions count)
         queries  (use-watch state/!queries)]
     (island/declare-signal ["_resourcesTab"] "registry")
+    [:div {:class [:space-y-3]}
+     [:div {:role "tablist" :class [:flex :gap-1]}
+      (resources-tab "registry" "Registry")
+      (resources-tab "counts" "Counts")]
+     [:dl (ui/attr {:role "tabpanel" :class [:grid :grid-cols-2 :gap-x-4 :gap-y-1]}
+            :hidden true (str "!(" (on-tab "counts") ")"))
+      (count-row "Resources opened" (:opened totals))
+      (count-row "Resources closed" (:closed totals))
+      (count-row "Sessions attached" (:attached sessions))
+      (count-row "Sessions detached (in grace)" (:detached sessions))
+      (count-row "Live action tokens" actions)
+      (count-row "One-off queries started" (:started queries))
+      (count-row "One-off queries completed" (:completed queries))
+      (count-row "One-off queries cancelled" (:cancelled queries))]
+     (resources-table entries)]))
+
+
+(defisland resources-card
+  []
+  (let [open (cookie/use-cookie resources-open)]
     [:section {:class card}
      [:div {:class [:flex :items-start :justify-between :gap-4]}
       (heading "Server resources"
         "The resource registry, live, across all sessions, and what else the server holds. The card is patched with "
-        "every change to them; the table and its tabs stay as the browser has them.")
+        "every change to them; the table and its tabs stay as the browser has them. Hidden, it isn't rendered, and "
+        "reads none of them.")
       [:button (ui/aria-expanded {:class button :data-on:click (ui/toggle open)} open)
        (fold-label open "Hide" "Show")]]
-     [:div (ui/shown {:class [:space-y-3]} open)
-      [:div {:role "tablist" :class [:flex :gap-1]}
-       (resources-tab "registry" "Registry")
-       (resources-tab "counts" "Counts")]
-      [:dl (ui/attr {:role "tabpanel" :class [:grid :grid-cols-2 :gap-x-4 :gap-y-1]}
-             :hidden true (str "!(" (on-tab "counts") ")"))
-       (count-row "Resources opened" (:opened totals))
-       (count-row "Resources closed" (:closed totals))
-       (count-row "Sessions attached" (:attached sessions))
-       (count-row "Sessions detached (in grace)" (:detached sessions))
-       (count-row "Live action tokens" actions)
-       (count-row "One-off queries started" (:started queries))
-       (count-row "One-off queries completed" (:completed queries))
-       (count-row "One-off queries cancelled" (:cancelled queries))]
-      (resources-table entries)]]))
+     [:div (ui/shown open)
+      (when (cookie/observe open) (resources-body))]]))
 
 
 ;; Raw HTML ---------------------------------------------------------------------

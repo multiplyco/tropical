@@ -97,7 +97,7 @@
 (defn- watch-token
   "The token the root of `html` asks the browser to send the entry to."
   [html]
-  (second (re-find #"&quot;_storageWatch&quot;:\{&quot;([^&]+)&quot;" html)))
+  (second (re-find #"&quot;_watch&quot;:\{&quot;([^&]+)&quot;" html)))
 
 
 (deftest an-observed-boolean-keeps-false

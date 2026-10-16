@@ -59,7 +59,6 @@
   (:require
     [clojure.string :as str]
     [co.multiply.scoped :refer [ask]]
-    [co.multiply.tropical.action :as action]
     [co.multiply.tropical.internal.browser-code :as browser-code]
     [co.multiply.tropical.internal.browser-state :as browser-state]
     [co.multiply.tropical.island :as island]
@@ -196,14 +195,14 @@
 
 (def ^:private global-name
   "Where the page keeps what the handler needs between patches: the default
-  each entry was declared with, by key, and the timers of `observe`'s sends."
+  each entry was declared with, by key."
   "__tropicalStorage")
 
 
 (defn- global-js
   "The expression initializing the page's shared storage bookkeeping."
   []
-  (str "globalThis[" (island/json-js global-name) "] ??= {defaults: {}, timers: {}}"))
+  (str "globalThis[" (island/json-js global-name) "] ??= {defaults: {}}"))
 
 
 (defn- key-js
@@ -298,22 +297,12 @@
   the value through bindings, it needs no reading: read it for what only the
   server can render from it, such as a row per item, or a count."
   [handle]
-  (let [{:keys [state slot default]} handle
-        {:keys [uid tab]} (island/use-session)
-        {:keys [token !value !handler]}
-        (island/use-hold [::observe (:signal state) slot]
-          (fn []
-            (let [{:keys [value release]} (action/mint uid tab)]
-              {:value   (assoc value :!value (atom ::unsent))
-               :release release}))
-          {:idempotent true})]
-    (reset! !handler (fn [body]
-                       (let [v (get body "value")]
-                         (reset! !value (if-some [decoded (decode state v)] decoded default))
-                         nil)))
-    (island/declare-signal ["_storageWatch" token] [(:signal state) slot])
-    (let [v (island/use-watch !value)]
-      (if (= ::unsent v) pending v))))
+  (let [{:keys [state slot default path]} handle
+        v (browser-state/observe [::observe (:signal state) slot] path
+            {:ms    300
+             :read  #(if-some [decoded (decode state %)] decoded default)
+             :value ::unsent})]
+    (if (= ::unsent v) pending v)))
 
 
 ;; Setting ----------------------------------------------------------------------
@@ -408,8 +397,8 @@
 
 (defn handler-js
   "The statements of the body's signal-patch handler (`ui/page-attrs`) that
-  keep the `_storage` signals of `patch` in `localStorage`, drop the entries
-  `forget` names, and send `observe`'s values."
+  keep the `_storage` signals of `patch` in `localStorage`, and drop the
+  entries `forget` names."
   {:no-doc true}
   []
   (browser-code/call keep-program ["$" "patch" (config-js)]))

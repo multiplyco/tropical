@@ -27,8 +27,8 @@ Everything from the browser is the user's to change, whatever the page's script 
 
 - **Signals** arrive as JSON, with string keys: validate them as any request's parameters.
 - **An action's value** (`:value`) is checked against what the island rendered, since no token vouches for it.
-- **Cookie states** are read from the request's cookie and checked with the state's `:valid?`, falling back to its
-  default ([State the browser owns](browser-state.md)).
+- **Cookie states** are read from the request's cookie, or sent by the page to `cookie/observe`, and checked with the
+  state's `:valid?`, falling back to its default ([State the browser owns](browser-state.md)).
 - **Storage states** come back through `storage/decode`, which returns nil unless the value passes `:valid?`.
 - **An upload's arrival** is the browser's word. `:arrived` can check it, as with a HEAD on the stored object, and
   refuse it. The browser knows an upload by the id the island gave it, never by the app's reference, so it can't make

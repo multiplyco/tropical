@@ -76,7 +76,7 @@
         {:keys [data-on-signal-patch data-on-signal-patch-filter data-effect] :as attrs} (owned {:data-init "x"})]
     (is (= "x" (:data-init attrs)) "added to the body's own")
     (let [include (re-pattern (second (re-find #"/(.*)/" data-on-signal-patch-filter)))]
-      (doseq [root ["_cookie" "_storage" "_storageForget" "_storageWatch"]]
+      (doseq [root ["_cookie" "_storage" "_storageForget" "_watch"]]
         (is (re-find include (str root ".x.y")) root))
       (is (not (re-find include "_wire.frames")) "and only those"))
     (is (str/includes? data-on-signal-patch (str "\"" panel-signal "\":true")) "with each cookie state's default")

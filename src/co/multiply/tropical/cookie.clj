@@ -40,6 +40,9 @@
     (`co.multiply.tropical.ring` binds it), so its value is the state as the
     session began. The cookie is the client's to write: a value that isn't
     valid for its state reads as the default.
+  - An island that renders from the page's value, such as one placing a
+    panel's content only while it is open, reads it with `observe`: the
+    session's in the first frame, then the page's, as it changes.
 
   The server sets a state from an action, as it would any signal: its handler
   returns `patch`'s signals, which the islands using the state follow and the
@@ -155,14 +158,20 @@
   (browser-state/item-name item))
 
 
+(defn- valid
+  "`v`, a value from the browser, if it is a valid value of `state`; its
+  default if not."
+  [{:keys [default valid?]} v]
+  (if (and (or (boolean? v) (number? v) (string? v)) (try (valid? v) (catch Exception _ false)))
+    v
+    default))
+
+
 (defn- kept
   "The value of `state`, or of its `item`, as the session's request carried it,
   if valid; its default if not."
-  [{:keys [signal default valid?]} item]
-  (let [v (get (some-> (ask *cookie* nil) deref) (cond-> signal item (str "/" item)))]
-    (if (and (some? v) (try (valid? v) (catch Exception _ false)))
-      v
-      default)))
+  [state item]
+  (valid state (get (some-> (ask *cookie* nil) deref) (cond-> (:signal state) item (str "/" item)))))
 
 
 (defn use-cookie
@@ -186,9 +195,38 @@
 
 (defn value
   "The value of `handle`'s state as the session began: what to render for the
-  first paint. The browser's may have moved on since."
+  first paint. The browser's may have moved on since: `observe` follows it."
   [handle]
   (:value handle))
+
+
+(defn observe
+  "The page's value of `handle`'s state, as `use-cookie` gives the handle, for
+  the server to render from: the session's at first, as `value` gives it, so
+  the first frame has it, then the page's, each time it changes, for as long
+  as the island reads it. The island renders again when it does. A value
+  that isn't valid reads as the default.
+
+      (let [open (use-cookie resources-open)]
+        [:section
+         [:button (ui/aria-expanded {:data-on:click (ui/toggle open)} open) \"Resources\"]
+         [:div (ui/shown open)
+          (when (observe open) (resource-list))]])
+
+  What `ui/shown` hides, the server goes on rendering, and the islands in it
+  go on reading. Placed by `observe`, it is rendered only while the page shows
+  it: the element shows at once, and what it holds a round trip later. Hide
+  with `ui/shown` alone what is cheap to keep live.
+
+  It follows the page, not the cookie, which the page's tabs share: each
+  session renders what its own tab shows."
+  [handle]
+  (let [{:keys [state value path]} handle]
+    (browser-state/observe [::observe path] path
+      {:ms     0
+       :read   #(valid state %)
+       :value  value
+       :known? true})))
 
 
 ;; Setting ----------------------------------------------------------------------
