@@ -11,7 +11,9 @@
   (:require
     [clojure.string :as str]
     [co.multiply.tropical.island :as island]
-    [co.multiply.tropical.resource :as resource]))
+    [co.multiply.tropical.resource :as resource])
+  (:import
+    [clojure.lang Compiler]))
 
 
 (def pending
@@ -83,6 +85,19 @@
     (into (sorted-set) (filter #(contains? env %)) refers)))
 
 
+(defn- position
+  "The line and column of `form`, or, where it has none, of the form the
+  compiler is in: for a form a macro expanded into, the macro's caller. Nil
+  where neither is known, as when it is expanded outside the compiler."
+  [form]
+  (let [{:keys [line column]} (meta form)]
+    (if line
+      [line column]
+      (let [line @Compiler/LINE]
+        (when (pos? line)
+          [line @Compiler/COLUMN])))))
+
+
 (defmacro observe
   "The latest value emitted by a resource shared with every reader of the same
   call site and `args`. The island renders again on each new value.
@@ -126,13 +141,18 @@
   The same call made again in one render, with equal `args`, returns the same
   value, from the one resource. So a hook of the app's own wrapping `observe`,
   whose every read shares its call site, may be called by several hooks in
-  one render, each asking of the same data."
+  one render, each asking of the same data.
+
+  The call site's position, which `resource/describe` gives, is the form's.
+  An `observe` that a macro of the app's expands into has none of its own,
+  and takes its caller's: each read through the macro is told apart by where
+  it is written."
   [& args+f]
   (when (empty? args+f)
     (throw (IllegalArgumentException. "observe takes a fn, after its args.")))
   (let [args   (vec (butlast args+f))
         f      (last args+f)
-        {:keys [line column]} (meta &form)
+        [line column] (position &form)
         site   (resource/call-site (ns-name *ns*) line column)
         locals (captured &env f)]
     (when (seq locals)

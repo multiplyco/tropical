@@ -463,3 +463,27 @@
       (is (= {:kind :other :key [:x]} (resource/describe [:x])))
       (finally
         (runtime/dispose! rt)))))
+
+
+(defmacro ^:private read-of
+  "An app's macro over `observe`, which passes nothing of its own form on."
+  [n]
+  `(hooks/observe ::read-of ~n (fn [emit!# _# n#] (emit!# n#) nil)))
+
+
+(deftest a-read-through-a-macro-has-its-caller-s-position
+  (let [{:keys [step rt]} (harness (island/island-fn "macro-reads" nil
+                                     (fn []
+                                       [:p (read-of 1)
+                                        (read-of 2)])))]
+    (try
+      (step)
+      (let [by-n (into {}
+                   (keep (fn [k]
+                           (let [{:keys [args] :as d} (resource/describe k)]
+                             (when (= ::read-of (first args)) [(second args) d]))))
+                   (keys @resource/!entries))]
+        (is (pos-int? (:line (by-n 1))) "where the macro was called")
+        (is (= (inc (:line (by-n 1))) (:line (by-n 2))) "each read by its own call"))
+      (finally
+        (runtime/dispose! rt)))))

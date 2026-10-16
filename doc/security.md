@@ -20,9 +20,11 @@ from here.
   vouches for less ([A value from the browser](actions.md#a-value-from-the-browser)).
 - **A tab is its user's.** A session belongs to the user whose request created it. A stream for another user's tab is
   refused, and its page reloads.
-- **The registry is every user's.** `(resource/use-summary)` lists every resource open on the server, with the
-  arguments of every user's reads: a panel that shows it is for whoever may see all of them. `(resource/use-summary
-  :session)` lists only what the tab's own islands read ([Reading from outside the page](reading.md)).
+- **The registry is every user's.** `(resource/use-summary)` lists every resource open on the server, with the arguments
+  of every user's reads: a panel that shows it is for whoever may see all of them. `(resource/use-summary :session)`
+  lists only what the tab's own islands read, but a read's arguments are the server's values, which can hold what the
+  page never shows: print them through a filter of the app's own ([Watching what is
+  open](reading.md#watching-what-is-open)).
 
 ## What the browser sends
 

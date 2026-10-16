@@ -169,20 +169,28 @@ again as a resource opens, gains or loses a reader, lingers or closes, never as 
   [scope]
   [:ul
    (for [[k {:keys [state subscribers]}] (resource/use-summary scope)
-         :let [{:keys [kind ns line args]} (resource/describe k)]]
-     [:li (if (= :observe kind) (str ns ":" line " " (pr-str args)) (pr-str k)) " " (name state) " " subscribers])])
+         :let [d (resource/describe k)]]
+     ;; Where each read is written, not its arguments, which are the server's values.
+     [:li (case (:kind d)
+            :observe (str (:ns d) ":" (:line d))
+            :shared (str (:state d))
+            "other")
+      " " (name state) " " subscribers])])
 ```
 
 - **`:server`, the default, is every resource open on this server**, each counting the islands that read it in any
-  session. Its rows are every user's reads, their arguments among them: show it only to whoever may see all of them ([Security](security.md)).
-- **`:session` is what this tab's islands read**, each counting those islands only. It shows nothing the page doesn't
-  already read, so it suits a panel any user may open. A resource the tab lets go leaves it, though it may linger for
-  other tabs.
+  session. Its rows are every user's reads, their arguments among them: show it only to whoever may see all of them
+  ([Security](security.md)).
+- **`:session` is what this tab's islands read**, each counting those islands only, so it suits a panel for users who
+  may not see the whole server's. It narrows whose reads, not what their arguments hold: those are the server's values,
+  and can hold what the page never shows, such as a database connection or a credential, so print them through a filter
+  of the app's own. A resource the tab lets go leaves it, though it may linger for other tabs.
 - **`resource/describe` says what opened a resource**, as data: an `observe`'s `{:kind :observe, :ns, :line, :column,
   :args}`, where the position is its form's, or a shared state's instance, `{:kind :shared, :state, :key}`. Read a key
   through it, not by its shape: the call site in a key is a symbol unique to its expansion, whose format is
-  Tropical's. A macro of the app's over `observe` keeps its caller's position by passing its form's metadata on,
-  ``(with-meta `(observe ...) (meta &form))``; a function's reads all have the function's own, and differ by `:args`.
+  Tropical's. An `observe` that a macro of the app's expands into has the position of the macro's caller, so each read
+  through the macro is told apart by where it is written; a function's reads all have the function's own, and differ
+  by `:args`.
 
 Both are for diagnostics: a view works the registry out again each time it changes, anywhere on the server. At the
 REPL, `(resource/summary)` gives the server's, once.

@@ -16,7 +16,8 @@ what the server knows of it, so each store has a namespace of its own:
 
 Both work the same way in the page:
 
-- **A state is a Datastar signal**, local to the page, which an island declares on its root only if it is missing (`data-signals__ifmissing`), so a later render, a patch or the island mounting again never undoes what the user did.
+- **A state is a Datastar signal**, local to the page, which an island declares on its root only if it is missing
+  (`data-signals__ifmissing`), so a later render, a patch or the island mounting again never undoes what the user did.
 - **The island gets a handle** for the helpers in `co.multiply.tropical.ui` ([The `ui` helpers](#the-ui-helpers)).
 - **The page writes each change into the store.** The element the app mounts in, `(ring/mount :body attrs)`, carries
   `ui/page-attrs`, whose handler does it ([Serving pages](serving.md)).
@@ -127,10 +128,11 @@ Both work the same way in the page:
 takes any expression, over the handles' signals or the page's own, and `ui/json` puts a value of the server's into one.
 
 - **Any attribute, over any expression.** `(ui/attr attrs k value expr)` is what `shown` and `aria-expanded` are built
-  on. The server renders `value`, its reckoning of the expression, for the first paint. Datastar then sets the
-  attribute `k` from the expression `expr`, and keeps it as the browser has it when the island is sent again (`data-attr`, `data-preserve-attr`). An `aria-*` state gets the words `true` and `false`, where Datastar would leave
-  a boolean's `true` empty, which counts as no state. Thread several onto one element, rather than `merge` them, so
-  each stays preserved:
+  on. The server renders `value`, its reckoning of the expression, for the first paint. Datastar then sets the attribute
+  `k` from the expression `expr`, and keeps it as the browser has it when the island is sent again (`data-attr`,
+  `data-preserve-attr`). An `aria-*` state gets the words `true` and `false`, where Datastar would leave a boolean's
+  `true` empty, which counts as no state. Thread several onto one element, rather than `merge` them, so each stays
+  preserved:
 
   ```clojure
   [:button (-> {:role "tab" :data-on:click "$tab = 'files'"}
@@ -144,5 +146,5 @@ takes any expression, over the handles' signals or the page's own, and `ui/json`
   browser's text back when the island is sent again, before the page paints.
 - **A handle's signal.** `ui/signal` names it in an expression, `ui/path` in a `data-bind`, and `ui/toggle` flips a
   boolean one.
-- **A value of the server's, in an expression.** `ui/json` writes it as a JavaScript literal,
-  `(str "$tab = " (ui/json tab))`, where a value spliced in as it is written could become code ([Security](security.md)).
+- **A value of the server's, in an expression.** `ui/json` writes it as a JavaScript literal, `(str "$tab = " (ui/json
+  tab))`, where a value spliced in as it is written could become code ([Security](security.md)).

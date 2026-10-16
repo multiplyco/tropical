@@ -286,8 +286,9 @@ plain function returning hiccup, called inside islands.
   requests the handler takes as actions. A body read before the handler gets a 500.
 - **Renders see the scope of the request that created the session**, fixed for its life. An action sees its own
   request's scope.
-- **An open stream isn't checked again.** Middleware that checks access runs when the stream connects. A user who
-  loses access while the page is open keeps its live updates until the stream reconnects. Read access in the islands (`observe`), or close the user's sessions when it changes.
+- **An open stream isn't checked again.** Middleware that checks access runs when the stream connects. A user who loses
+  access while the page is open keeps its live updates until the stream reconnects. Read access in the islands
+  (`observe`), or close the user's sessions when it changes.
 - **Signing out:** end the sign-in, then `(session/close-user! uid)`. The user's tabs reconnect, the middleware
   refuses them, and each page reloads into the app's answer. It closes only this JVM's sessions: on several servers,
   tell each, or have the root island read the user's standing from the database with `observe` and render
@@ -346,7 +347,8 @@ plain function returning hiccup, called inside islands.
   `(island/element-id path)` maps a path to its digest.
 - `(resource/summary)` lists the open resources, their readers and state. For a panel of them, an island reads
   `(resource/use-summary)`, every one on the server, which holds every user's reads, or `(resource/use-summary
-  :session)`, the tab's own. `(resource/describe k)` says what opened one, as data.
+  :session)`, the tab's own. `(resource/describe k)` says what opened one, as data. A read's `:args` are server values,
+  such as a connection, even in the tab's own view: print them through a filter.
 - A failed island is logged with its path, its element id and its reference, which the default view shows the user.
   One failing again the same way keeps its reference; repeat lines are throttled, and recent stack traces are shared
   across instances. A line can name an earlier reference that has its trace. Error-view failures are tracked
@@ -382,6 +384,8 @@ plain function returning hiccup, called inside islands.
   `use-hold`.
 - A signal name, island id or script URL written by hand → breaks when names are digests. Use the helpers.
 - A resource key's call site parsed, or its shape relied on → breaks when the format changes. Use `resource/describe`.
+- A resource's `:args` printed in a panel, even the tab's own → can show a connection or a credential. Filter
+  them.
 - A server value spliced into an expression with `str` → can become code. Use `(ui/json v)`.
 - A placeholder id written by hand, or a binding of the app's own for the page's path → `ring/mount` places the
   root, and `(:request (use-session))` has the path.

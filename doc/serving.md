@@ -127,11 +127,12 @@ An app of many pages shares one map, and gives each route its own root:
 
 ## The page
 
-- **The app mounts in an element of the page's.** `(ring/mount :body attrs & children)` renders the element, such as
-  the body, with the app's attributes, holding the session's first frame. Its attributes open the tab's stream, kept
-  open while the page is hidden if the app says `:open-when-hidden`, keep the state the browser owns ([State the browser owns](browser-state.md)), and refuse files dropped outside a drop area. `children` go after the
-  first frame, outside the islands, such as a container for dialogs. The element's `data-init` opens the stream, so
-  `attrs` can't have one, and a page mounts once.
+- **The app mounts in an element of the page's.** `(ring/mount :body attrs & children)` renders the element, such as the
+  body, with the app's attributes, holding the session's first frame. Its attributes open the tab's stream, kept open
+  while the page is hidden if the app says `:open-when-hidden`, keep the state the browser owns ([State the browser
+  owns](browser-state.md)), and refuse files dropped outside a drop area. `children` go after the first frame, outside
+  the islands, such as a container for dialogs. The element's `data-init` opens the stream, so `attrs` can't have one,
+  and a page mounts once.
 - **The head takes the islands' scripts.** `(ring/scripts nonce)` gives the script tags of the scripts the first
   frame's islands declared, with the page's CSP nonce ([Scripts the page needs](scripts.md)). With `mount` and
   `scripts`, `:page` needs nothing from its argument but the request, for the nonce and the app's own head.
@@ -248,8 +249,9 @@ server's compression.
   request extends that life. A balancer can count it from when it first set the cookie instead, even while setting
   the cookie again on every response. Then no request extends it, so it lapses under a tab in use too, and only a long
   life helps.
-- **Heartbeats.** A dead connection is only noticed on write, so a quiet stream writes a heartbeat every 10 s (`session/heartbeat-ms`): an SSE comment, which the client ignores, and which keeps the idle timeouts of proxies
-  along the way from closing it.
+- **Heartbeats.** A dead connection is only noticed on write, so a quiet stream writes a heartbeat every 10 s
+  (`session/heartbeat-ms`): an SSE comment, which the client ignores, and which keeps the idle timeouts of proxies along
+  the way from closing it.
 - **Hidden tabs.** Datastar closes a hidden tab's stream and opens it again when the tab is shown. Its session keeps
   its islands, and what they hold, for 15 s (`session/grace-ms`), then lets go of them. A tab shown within that gets
   what changed while it was hidden; one shown after it gets a fresh session. `:open-when-hidden true` in the app keeps

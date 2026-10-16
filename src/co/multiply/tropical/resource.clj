@@ -289,10 +289,11 @@
 (defn describe
   "What opened the resource under `key`, as data: for an `observe`,
   `{:kind :observe, :ns, :line, :column, :args}`, where `:ns` is a symbol,
-  the position its form's, if it had one, and `:args` its arguments; for a
-  shared state's instance (`co.multiply.tropical.shared`), `{:kind :shared,
-  :state, :key}`, where `:state` is the state's qualified symbol. For a key of
-  another shape, `{:kind :other, :key key}`."
+  the position its form's, or for one a macro expanded into, the macro
+  caller's, if known, and `:args` its arguments; for a shared state's
+  instance (`co.multiply.tropical.shared`), `{:kind :shared, :state, :key}`,
+  where `:state` is the state's qualified symbol. For a key of another
+  shape, `{:kind :other, :key key}`."
   [key]
   (let [[site & more] key]
     (cond
@@ -335,13 +336,17 @@
     it, though it may linger for others.
 
       (let [open (resource/use-summary :session)]
-        [:ul (for [[k {:keys [state subscribers]}] open]
-               [:li (pr-str (resource/describe k)) \" \" (name state) \" \" subscribers])])
+        [:ul (for [[k {:keys [state subscribers]}] open
+                   :let [{:keys [ns line]} (resource/describe k)]]
+               [:li (str ns \":\" line) \" \" (name state) \" \" subscribers])])
 
   The server's view holds every user's reads, their arguments among them,
-  so show it only to whoever may see them all. The session's view holds what
-  the page already reads. For a diagnostic: it is worked out again over the
-  whole registry each time it changes. A hook: call it during the render."
+  so show it only to whoever may see them all. The session's view holds only
+  this tab's reads, but their arguments are the server's values, and can
+  hold what the page never shows, such as a database connection: print them
+  through a filter of the app's own. For a diagnostic: it is worked out again
+  over the whole registry each time it changes. A hook: call it during the
+  render."
   ([]
    (use-summary :server))
   ([scope]

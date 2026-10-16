@@ -105,7 +105,8 @@ session.
     lists the toasts' instance with a subscriber per tab.
 15. **Switch tabs.** The Server resources card's Registry, This tab and Counts tabs switch in the browser, on a local
     signal, and stay as you left them while the card is patched with every change to the registry. Registry is every
-    resource open on the server, and This tab the ones this tab's islands read, with its own readers (`resource/use-summary`). Post is enabled while the message has text, from the first paint (`ui/attr`).
+    resource open on the server, and This tab the ones this tab's islands read, with its own readers
+    (`resource/use-summary`). Post is enabled while the message has text, from the first paint (`ui/attr`).
 16. **Suggest.** Suggest answers at once, and a moment later its suggestion lands in the message, sent from a background
     task (`use-patch-signals`). Type over it: the composer renders again as the suggestion lands, or as you suggest
     again, and leaves what you typed until the next one arrives.
@@ -113,11 +114,13 @@ session.
     island keyed by its term, so the new one starts with its example hidden, and goes in the old one's place: the card,
     and its passage, aren't sent.
 18. **Keep a draft.** In the Drafts card, Rework a proposal, edit its sections, and pick a chip, which adds its line to
-    the note. Close the dialog, reload, or restart the server: the edits are still there, kept in the browser's storage (`defstorage`), and the server stores none of them. Each row counts its draft's words on the server, which reads the
+    the note. Close the dialog, reload, or restart the server: the edits are still there, kept in the browser's storage
+    (`defstorage`), and the server stores none of them. Each row counts its draft's words on the server, which reads the
     draft from the browser a moment after you stop typing (`storage/observe`). Start passes the draft to its action as a
     value and drops it; Dismiss drops it while the dialog is closed. "Start, then open alpha" opens alpha's page, which
-    tells of it in a toast, and drops the draft before that page loads: back on `/`, the dialog shows the proposal as
-    it was.
+    tells of it in a toast, and drops the draft before that page loads: back on `/`, the dialog shows the proposal as it
+    was.
 19. **Rate.** The stars in the Rocket card are a web component made with Datastar's Rocket, `<star-rating>`. Open its
     breakdown, then rate in another tab: every tab's props change as the island is patched, and the breakdown stays
-    open, a signal of the component's own. "Clear it" is the island's action, in the component's children ([Components with Rocket](rocket.md)).
+    open, a signal of the component's own. "Clear it" is the island's action, in the component's children ([Components
+    with Rocket](rocket.md)).
