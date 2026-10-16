@@ -16,7 +16,7 @@ its islands, functions returning hiccup, and sends what changed over one SSE str
 by element id. Writes come back as actions: closures rendered into the page as tokens, posted with Datastar's signals.
 
 **Repository**: https://github.com/multiplyco/tropical —
-`co.multiply/tropical {:mvn/version "0.7.0"}`, JDK 25+, Clojure 1.12+, Datastar 1.0.4 in the browser.
+`co.multiply/tropical {:mvn/version "0.8.0"}`, JDK 25+, Clojure 1.12+, Datastar 1.0.4 in the browser.
 
 This file covers what you can't infer: where a reasonable guess from React, Electric, htmx or a Datastar server SDK is
 wrong. It is not an API reference. The app-facing vars and namespaces carry thorough docstrings, so for signatures and
@@ -378,8 +378,8 @@ plain function returning hiccup, called inside islands.
 - Expecting the view in the action's response → it comes over the stream.
 - A file input bound with Datastar's `data-bind` → its bytes go in signals as base64, refused past the action body's
   cap (1 MiB by default). Use `use-uploads`.
-- `shared/swap!` on an instance no island reads → dropped, and it returns false. Shared state lives while read; what
-  must last goes in a database.
+- `shared/swap!` after an instance's linger expires → dropped, and it returns false. Writes during the linger still
+  succeed. What must last goes in a database.
 - A task started in a render → belongs to the session, not the island, and outlives it. Use `observe` or
   `use-hold`.
 - A signal name, island id or script URL written by hand → breaks when names are digests. Use the helpers.

@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.8.0 - 2026-10-16
 
 - `cookie/observe` reads the page's value of a cookie state, for an island that renders from it: the session's value
   in the first frame, then the page's, sent as it changes, while the island reads it. A panel, group or tab can place
