@@ -408,6 +408,42 @@
   {:init 0})
 
 
+(defisland self-summary
+  [keys before?]
+  (let [summarize #(into {} (map (fn [[k v]] [(:key (resource/describe k)) (:subscribers v)]))
+                     (resource/use-summary :session))
+        before (when before? (summarize))]
+    (doseq [k keys]
+      (shared/use-shared described k))
+    [:p (pr-str (if before? before (summarize)))]))
+
+
+(deftest a-session-summary-includes-the-island-reading-it
+  (doseq [before? [false true]]
+    (let [!keys (atom [:a :a])
+          {:keys [step rt]} (harness #(self-summary @!keys before?))
+          summary #(read-string (second (re-find #">([^<]*)</p>" (island/html (step)))))]
+      (try
+        (let [first-summary (summary)]
+          (when-not before?
+            (is (= {:a 1} first-summary) "a hold acquired before the summary is visible in the first frame"))
+          (is (= {:a 1} (summary)) "both hook orders settle, counting an idempotent hold once"))
+        (reset! !keys [:b])
+        (summary)
+        (is (= {:b 1} (summary)) "replaced holds leave the view even while they linger")
+        (reset! !keys [])
+        (summary)
+        (is (= {} (summary)) "released holds leave the view")
+        (reset! !keys [:a])
+        (summary)
+        (is (= {:a 1} (summary)) "an existing island includes its newly acquired holds too")
+        (let [renders (runtime/render-counts rt)]
+          (summary)
+          (is (= renders (runtime/render-counts rt)) "a settled summary needs no further renders"))
+        (finally
+          (runtime/dispose! rt))))))
+
+
 (deftest a-key-is-described-as-data
   (let [{:keys [step rt]} (harness (island/island-fn "both" nil
                                      (fn []

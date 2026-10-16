@@ -115,7 +115,7 @@ test('observations coalesce, read the latest value, and revoke gone tokens', asy
   await b.tick()
   assert.equal(b.requests.length, 1)
   assert.equal(b.requests[0].headers['Tropical-Action'], 'token')
-  assert.deepEqual(JSON.parse(b.requests[0].body), {value: false})
+  assert.equal(JSON.parse(b.requests[0].body).value, false)
   assert.equal(signals._watch.token, null)
 })
 
@@ -125,7 +125,7 @@ test('an observation on another server asks the page to reopen', async () => {
   b.run('watch', signals, {_watch: signals._watch}, watchConfig)
   await b.tick()
   assert.deepEqual(b.events, ['tropical:reopen'])
-  assert.deepEqual(JSON.parse(b.requests[0].body), {value: null})
+  assert.equal(JSON.parse(b.requests[0].body).value, null)
 })
 
 test('forget removes storage and restores the default before navigation', async () => {
@@ -140,7 +140,7 @@ test('forget removes storage and restores the default before navigation', async 
   assert.equal(signals._storageForget, null)
   assert.equal([...b.timers.values()][0].ms, 0, 'at once, though the patch changed the entry too')
   await b.tick()
-  assert.deepEqual(JSON.parse(b.requests[0].body), {value: 'initial'})
+  assert.equal(JSON.parse(b.requests[0].body).value, 'initial')
 })
 
 test('a cookie observation sends at once, and only what the server does not hold', async () => {
@@ -155,20 +155,20 @@ test('a cookie observation sends at once, and only what the server does not hold
   change(false)
   assert.equal([...b.timers.values()][0].ms, 0)
   await b.tick()
-  assert.deepEqual(JSON.parse(b.requests[0].body), {value: false})
+  assert.equal(JSON.parse(b.requests[0].body).value, false)
   change(false)
   await b.tick()
   assert.equal(b.requests.length, 1, 'nor what it was last sent')
   change(true)
   await b.tick()
-  assert.deepEqual(JSON.parse(b.requests[1].body), {value: true})
+  assert.equal(JSON.parse(b.requests[1].body).value, true)
 })
 
 test('a cookie observation of a page that has moved on sends its value as it appears', async () => {
   const b = browser(), signals = {_cookie: {open: {a: false, b: true}}, _watch: {token: [['_cookie', 'open', 'a'], 0, true]}}
   b.run('watch', signals, {_watch: signals._watch}, watchConfig)
   await b.tick()
-  assert.deepEqual(JSON.parse(b.requests[0].body), {value: false})
+  assert.equal(JSON.parse(b.requests[0].body).value, false)
   b.run('watch', signals, {_cookie: {open: {b: false}}}, watchConfig)
   assert.equal(b.timers.size, 0, 'another item is another watch\'s')
 })
@@ -182,7 +182,43 @@ test('a value whose send failed is sent again', async () => {
   b.run('watch', signals, {_cookie: {open: false}}, watchConfig)
   await b.tick()
   assert.equal(b.requests.length, 2)
-  assert.deepEqual(JSON.parse(b.requests[1].body), {value: false})
+  assert.equal(JSON.parse(b.requests[1].body).value, false)
+})
+
+test('overlapping observations carry their send order and ignore older failures', async () => {
+  for (const failure of [503, 403, 404, 'reopen', 'network']) {
+    const b = browser(), replies = []
+    const signals = {_cookie: {open: true}, _watch: {token: [['_cookie', 'open'], 0, true]}}
+    b.context.fetch = (url, options) => new Promise((resolve, reject) => {
+      b.requests.push({url, ...options})
+      replies.push({resolve, reject})
+    })
+    const change = async value => {
+      signals._cookie.open = value
+      b.run('watch', signals, {_cookie: {open: value}}, watchConfig)
+      await b.tick()
+    }
+    await change(false)
+    await change(true)
+    const [older, newer] = b.requests.map(request => JSON.parse(request.body))
+    assert.equal(older.value, false)
+    assert.equal(newer.value, true)
+    assert.ok(Number.isSafeInteger(older.sequence) && older.sequence > 0)
+    assert.ok(newer.sequence > older.sequence, 'the server can reject an older arrival')
+    replies[1].resolve(b.context.response)
+    await b.tick()
+    if (failure === 'network') replies[0].reject(new Error('connection lost'))
+    else replies[0].resolve({
+      status: failure === 'reopen' ? 409 : failure,
+      ok: false,
+      headers: new Map(failure === 'reopen' ? [['Tropical-Reopen', 'true']] : []),
+    })
+    await b.tick()
+    await change(true)
+    assert.equal(b.requests.length, 2, 'an older failure does not forget the newer successful send')
+    assert.ok(Array.isArray(signals._watch.token), 'an older reply does not revoke the watch')
+    assert.deepEqual(b.events, [], 'an older reply does not reopen a working session')
+  }
 })
 
 test('pruning checks owner, age, version and declaration while preserving other apps', () => {

@@ -139,9 +139,12 @@ and coalescing come from the runtime and the session pump instead, and are cover
   reads among it, or of what one session's islands hold, which shows nothing the page doesn't read. The session's view
   takes no bookkeeping: its islands hold the very value cells the registry's entries do, so the session matches its
   holds against the registry, on its own thread, and renders again as the registry changes, which it does whenever the
-  session gains or drops a read. A view per user, across a user's tabs, was set aside: other sessions' holds are their
-  threads' to read, so it would need the registry to count readers per session, measured at a few hundred
-  nanoseconds more per acquire and release (logbook, 2026-10-16), for a view no panel asked for yet.
+  session gains or drops a read. Its own acquisitions in the current render count too: they may have opened before
+  the view subscribed to the registry, and a new island isn't yet in the session's instance table. Old holds count
+  until released after the render, which changes the registry again. A view per user, across a user's tabs, was set
+  aside: other sessions' holds are their threads' to read, so it would need the registry to count readers per session,
+  measured at a few hundred nanoseconds more per acquire and release (logbook, 2026-10-16), for a view no panel asked
+  for yet.
 - **The linger.** Without it, every remount (a topic switched back, access granted again, a reconnect) would close and
   reopen a resource, and the churn would land on the database.
 - **Pending is a value, and a read given it waits.** A render reads `pending` and goes on, so the reads after it start
@@ -410,6 +413,10 @@ of the default. A draft the user is writing is large, and the server needn't ren
   how long to wait after a change, and for a cookie state, the value the server rendered. One program in the body's
   handler sends to every watch, as it appears and after each change, and only a value other than the one the server
   holds: what it was last sent, or what it rendered. After a send that fails, the next change is sent, whatever it is.
+  Each send carries a sequence number increasing per token. The server stores it atomically with the value and
+  ignores older or repeated sends, so overlapping requests cannot leave it on an earlier value. The page likewise
+  ignores an older request's response once it has sent another: a late failure cannot forget a newer send or revoke
+  its watch. Serial sends alone would not order a request that arrives after its connection failed.
   One program for both keeps a single copy of the send, the reopen and the revocation, in the code and in the page.
 
 ### In a cookie

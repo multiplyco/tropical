@@ -189,13 +189,17 @@
 
 
 (defn- held-values
-  "What every island of `rt` holds, as their last renders left it. On the
-  session's thread only, which owns the instances."
-  [rt]
+  "What every island of `rt` holds, including what `inst` has acquired in this
+  render, before its holds (or the instance itself) have been committed. Old
+  holds remain until released after the render, which invalidates the
+  registry. On the session's thread only, which owns the instances."
+  [rt ^Instance inst acquired]
   (into []
-    (comp (mapcat (fn [^Instance inst] (vals (.-holds inst))))
-      (map :value))
-    (vals @(:!instances rt))))
+    (comp (mapcat vals) (map :value))
+    (cons (merge (.-holds inst) acquired)
+      (keep (fn [^Instance other]
+              (when-not (identical? inst other) (.-holds other)))
+        (vals @(:!instances rt))))))
 
 
 (defn- render-hooks
@@ -220,7 +224,7 @@
      :declare! (fn [path value]
                  (vswap! !signals assoc-in path value)
                  nil)
-     :held     (fn [] (held-values rt))
+     :held     (fn [] (held-values rt inst @!holds))
      :signals! (fn [signals]
                  (when-not (map? signals)
                    (throw (IllegalArgumentException.

@@ -49,21 +49,29 @@
   sends to (`watch.js`), `_watch.<token>`: `[path ms]`, or with `known?`,
   `[path ms value]`, where the server renders the page's signal as `value`,
   and the page sends it only once it holds another. The handler sends as the
-  watch appears, and `ms` after each change. Once the island stops reading,
+  watch appears, and `ms` after each change. Sends carry a positive integer
+  `sequence`, increasing per token: an older or repeated send cannot replace
+  a newer value, regardless of request order. Once the island stops reading,
   the token is revoked, and the next send's 404 drops the watch."
   [k path {:keys [ms read value known?]}]
   (let [{:keys [uid tab]} (island/use-session)
-        {:keys [token !value !handler]}
+        {:keys [token !sample !handler]}
         (island/use-hold k
           (fn []
             (let [minted (action/mint uid tab)]
-              (update minted :value assoc :!value (atom value))))
+              (update minted :value assoc :!sample (atom {:sequence 0 :value value}))))
           {:idempotent true})]
     (reset! !handler (fn [body]
-                       (reset! !value (read (get body "value")))
+                       (let [sequence (get body "sequence")]
+                         (when (pos-int? sequence)
+                           (let [value (read (get body "value"))]
+                             (swap! !sample (fn [sample]
+                                              (if (> sequence (:sequence sample))
+                                                {:sequence sequence :value value}
+                                                sample))))))
                        nil))
     (island/declare-signal ["_watch" token] (cond-> [path ms] known? (conj value)))
-    (island/use-watch !value)))
+    (island/use-watch !sample :value)))
 
 
 (def ^:private watch-program

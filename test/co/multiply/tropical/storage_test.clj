@@ -107,9 +107,9 @@
         {:keys [step rt]} (harness reader)]
     (try
       (let [token (watch-token (island/html (step)))]
-        (action/invoke! token "user" {"value" false})
+        (action/invoke! token "user" {"value" false "sequence" 1})
         (is (re-find #">false<" (island/html (step))))
-        (action/invoke! token "user" {"value" "invalid"})
+        (action/invoke! token "user" {"value" "invalid" "sequence" 2})
         (is (re-find #">true<" (island/html (step))) "invalid values still use the default"))
       (finally
         (runtime/dispose! rt)))))
@@ -133,7 +133,8 @@
     (try
       (let [html  (island/html (step))
             token (watch-token html)
-            send! #(action/invoke! token "user" {"value" %})]
+            !sequence (atom 0)
+            send! #(action/invoke! token "user" {"value" % "sequence" (swap! !sequence inc)})]
         (is (str/includes? html "…") "pending until the browser sends it")
         (is (not (runtime/pending? rt)) "which the first frame doesn't wait for: the browser can't answer before it")
         (is (some? token) "the island asks the browser for it")

@@ -211,9 +211,9 @@
     (let [{:keys [step rt]} (harness labelled)]
       (try
         (let [[token] (watch (island/html (step)))]
-          (action/invoke! token "user" {"value" "x"})
+          (action/invoke! token "user" {"value" "x" "sequence" 1})
           (is (str/includes? (island/html (step)) ">x<"))
-          (action/invoke! token "user" {"value" {"a" 1}})
+          (action/invoke! token "user" {"value" {"a" 1} "sequence" 2})
           (is (str/includes? (island/html (step)) ">none<") "or sent by the page"))
         (finally
           (runtime/dispose! rt))))))
@@ -226,7 +226,8 @@
       (scoping [cookie/*cookie* (delay {panel-signal false})]
         (let [html          (island/html (step))
               [token watch] (watch html)
-              send!         #(action/invoke! token "user" {"value" %})]
+              !sequence     (atom 0)
+              send!         #(action/invoke! token "user" {"value" % "sequence" (swap! !sequence inc)})]
           (is (not (str/includes? html "content")) "the session's value, in the first frame")
           (is (not (runtime/pending? rt)) "which waits for nothing")
           (is (= [["_cookie" panel-signal] 0 false] watch) "the page sends another, at once")
@@ -244,6 +245,28 @@
           (reset! !reads false)
           (step)
           (is (= [:gone] (send! false)) "revoked once nothing reads it")))
+      (finally
+        (runtime/dispose! rt)))))
+
+
+(deftest an-older-observation-cannot-overwrite-the-page-s-latest-value
+  (let [{:keys [step rt]} (harness #(placed true))]
+    (try
+      (let [[token] (watch (island/html (step)))
+            send! (fn [sequence value]
+                    (action/invoke! token "user" {"sequence" sequence "value" value}))]
+        (send! 2 false)
+        (is (not (str/includes? (island/html (step)) "content")))
+        (let [renders (runtime/render-counts rt)]
+          (doseq [sequence [1 2 nil "3" 3.5 -1]]
+            (send! sequence true)
+            (is (not (str/includes? (island/html (step)) "content"))
+              "older, repeated and malformed sends leave the latest value alone"))
+          (is (= renders (runtime/render-counts rt)) "nor do they render again"))
+        (send! 3 true)
+        (is (str/includes? (island/html (step)) "content"))
+        (send! 1 false)
+        (is (str/includes? (island/html (step)) "content") "the order survives replacing the handler on render"))
       (finally
         (runtime/dispose! rt)))))
 
@@ -277,7 +300,7 @@
       (let [html (island/html (step))]
         (is (str/includes? html "group 1"))
         (is (str/includes? html "group 2"))
-        (action/invoke! (get (watches html) ["_cookie" group-signal "1"]) "user" {"value" false})
+        (action/invoke! (get (watches html) ["_cookie" group-signal "1"]) "user" {"value" false "sequence" 1})
         (let [html (island/html (step))]
           (is (not (str/includes? html "group 1")))
           (is (str/includes? html "group 2"))))

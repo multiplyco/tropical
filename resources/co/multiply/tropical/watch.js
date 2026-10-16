@@ -1,6 +1,6 @@
 function watchSignals($, patch, {globalName}) {
   try {
-    const state = globalThis[globalName] ??= {timers: {}, sent: {}};
+    const state = globalThis[globalName] ??= {timers: {}, sent: {}, sequences: {}};
     const has = (value, k) => value !== null && typeof value === 'object' && k in value;
     /* Read without creating a missing Datastar signal. */
     const get = (...steps) => {
@@ -33,20 +33,26 @@ function watchSignals($, patch, {globalName}) {
       const current = get(...watch[0]), value = current === undefined ? null : current, json = JSON.stringify(value);
       const held = token in state.sent ? state.sent[token] : watch.length > 2 ? JSON.stringify(watch[2]) : null;
       if (json === held) return;
+      /* Requests may reach the server out of order, even after a network failure. */
+      const sequence = state.sequences[token] = (state.sequences[token] || 0) + 1;
       state.sent[token] = json;
       fetch(location.href, {
         method: 'POST',
         headers: {'Tropical-Action': token, 'Content-Type': 'application/json'},
-        body: JSON.stringify({value}),
+        body: JSON.stringify({value, sequence}),
       }).then(response => {
+        if (state.sequences[token] !== sequence) return;
         if (response.headers.has('Tropical-Reopen')) {
           state.sent[token] = null;
           dispatchEvent(new CustomEvent('tropical:reopen'));
         } else if (response.status === 403 || response.status === 404) {
           delete state.sent[token];
+          delete state.sequences[token];
           $._watch[token] = null;
         } else if (!response.ok) state.sent[token] = null;
-      }).catch(() => { state.sent[token] = null });
+      }).catch(() => {
+        if (state.sequences[token] === sequence) state.sent[token] = null;
+      });
     };
     const later = (token, ms) => {
       clearTimeout(state.timers[token]);

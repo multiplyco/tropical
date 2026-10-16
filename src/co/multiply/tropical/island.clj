@@ -157,8 +157,9 @@
 
 
 (defn ^:no-doc use-held
-  "A fn of no arguments returning what every island of this session holds, as
-  their last renders left it: the `:value` of each `use-hold`. For a
+  "A fn of no arguments returning what every island of this session holds:
+  the `:value` of each `use-hold`, including acquisitions made so far in this
+  render. Old holds remain until released after the render. For a
   diagnostic's `use-watch` selector, which runs on the session's thread; call
   it on no other."
   []
