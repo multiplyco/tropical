@@ -31,13 +31,20 @@ The wire is Datastar's SDK specification (`sdk/ADR.md` in the Datastar repositor
 - `README.md`: what the library is, an example, the model, and the index of the guides. Keep it short: the detail
   goes in a guide.
 - `doc/*.md` other than the two below: the guides, one per subject (`islands`, `reading`, `actions`, `browser-state`,
-  `shared-state`, `scripts`, `rocket`, `uploads`, `testing`, `serving`, `security`, `how-it-works`, `development`). A
-  change to what an app writes goes in its guide, and one to what it trusts, in `security` too. `doc/cljdoc.edn` lists
-  the pages cljdoc publishes, in order: add a new guide there and to the README's index. `rocket` follows the demo's
-  `<star-rating>`: check both against a new Datastar release.
-- `doc/design.md`: why it is built this way, and the alternatives rejected. Fold settled decisions in here.
-- `doc/logbook.md`: dated records (measurements with how they were taken, smoke-test findings, things that looked like
-  bugs and weren't), oldest first. Append; don't rewrite history.
+  `shared-state`, `scripts`, `rocket`, `uploads`, `testing`, `serving`, `security`, `how-it-works`), and
+  `development`, for working on Tropical. A change to what an app writes goes in its guide, and one to what it trusts,
+  in `security` too. `doc/cljdoc.edn` lists the pages cljdoc publishes, in order: add a new guide there and to the
+  README's index. `rocket` follows the demo's `<star-rating>`: check both against a new Datastar release.
+- Each guide keeps to its subject, and links the guide that owns a topic (`guide.md#anchor`) rather than repeating
+  it: `security` is an index of points, each linking its guide, and `how-it-works` explains the mechanism, linking
+  `serving` for the settings. Where a point involves Datastar, say which part is Datastar's (its signals, `@post`, the
+  morph, reconnecting) and which is Tropical's, without making a point of the split.
+- `doc/design.md`: why it is built this way, and the alternatives rejected. Fold settled decisions in here. It is
+  for maintainers, linked from the README's Development section, not its guides, and not on cljdoc: a guide may link
+  it for the why, but must say what an app needs itself.
+- `doc/logbook/`: dated records (measurements with how they were taken, smoke-test findings, things that looked like
+  bugs and weren't), one file per entry, `YYYY-MM-DD-subject.md`, listed oldest first in its `README.md`. A new entry
+  is a new file, added at the end of that list; don't rewrite history. Link an entry by its file.
 - `plans/`, the maintainers' own and not in the repository: `backlog.md`, open questions and parked ideas, and
   `app-requirements.md`, what a first app asked of the library. Where it exists, read the backlog before changing the
   API or the resource lifecycle.
@@ -71,6 +78,10 @@ teaches an app's agent what it can't infer from the API: where a guess from Reac
 wrong. It is not an API reference, since the docstrings are. When a change alters what an app writes, such as a
 hook's contract, a new trap or a renamed helper, update the skill with the guide. It follows the same public-repo
 hygiene.
+
+Agents other than Claude Code read the same `SKILL.md`, in the open Agent Skills format (the README's "Editors and
+agents"). So keep its frontmatter to `name` and `description`, and its text free of what only Claude Code has, such as
+its tool names. `npx skills add multiplyco/tropical --list` shows whether the installer still finds it.
 
 `bb deploy` tags (`v<version>`, pushed) and deploys to Clojars; credentials come from
 `CLOJARS_DEPLOY_MAVEN_USERNAME` / `CLOJARS_DEPLOY_MAVEN_PASSWORD`. A maintainer runs the deploy, never an agent.

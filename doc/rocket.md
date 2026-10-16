@@ -62,6 +62,8 @@ And an island uses it:
      [:span "Rate this."]]))
 ```
 
+## Loading it
+
 - **One Datastar.** The bundle with Rocket holds Datastar, so it replaces `datastar.js`, and a component imports
   `rocket` from the page's copy. A second copy would be a second engine. In CSP mode, it would compile nothing either,
   since Datastar takes the page's nonce off `<html>` as it starts. The import map names the copy once, so the page's
@@ -70,34 +72,42 @@ And an island uses it:
   frame, or over the stream when an island using it is patched in, once per page. Rocket defines the element as the
   module runs, and won't define it again, as with any `customElements.define`: a page reloads when its stream
   connects to a server on which the component has changed, as after a deploy ([Scripts](scripts.md)).
+
+## Props and events
+
 - **Props are the island's.** The island renders them as attributes, a structured one as JSON, which `ui/json`
-  writes. Rocket decodes them with the component's codecs, and renders again when a patch changes them. A prop the
-  component sets itself is written back to its attribute, and the island's next render puts its own value back, or,
-  if it renders none, removes it, and the prop falls back to its default. What the component owns goes in its local
-  signals; or the island renders `data-preserve-attr` naming the attribute, and the morph leaves it.
+  writes. Rocket decodes them with the component's codecs, and renders again when a patch changes them.
+- **A prop the component sets is undone.** Rocket writes it back to its attribute, and when the island is sent again,
+  Datastar's morph puts the island's value back, or removes it if the island renders none, and the prop falls back to
+  its default. What the component owns goes in its local signals; or the island renders `data-preserve-attr` naming
+  the attribute, and the morph leaves it.
 - **Events are actions.** The component emits an event from its element with `emit`. The island takes it with
   `data-on:<event>` on the element, and the event's detail with `use-action`'s `{:value "evt.detail"}`, untrusted, as
-  any value from the browser ([Actions](actions.md)). The element's own attributes are in the page's scope, not the
-  component's.
+  any value from the browser ([Actions](actions.md#a-value-from-the-browser)). The element's own attributes are in
+  the page's scope, not the component's.
+- **The `js` codec is code.** It makes functions of what an attribute holds, so a server value in such a prop is the
+  injection [Security](security.md) describes for expressions. Values go through the others, such as `json` and
+  `string`.
+
+## What the component keeps
+
 - **Local signals stay with the element.** `$$name` is the component's own signal, under `_rocket.<tag>.<id>`. Its
   key starts with `_`, so no action or stream sends it, and a patch leaves it. It lasts as long as the element stays
   where it is: one that is moved, as the morph moves an element when its list reorders, or replaced, starts over, as
   Rocket drops its signals when it leaves the page. What must outlast that is the island's (`use-state`) or the
   browser's ([State the browser owns](browser-state.md)).
-- **A shadow root, not `light`.** The default mode, `open`, and `closed` draw into a shadow root, which the island's
-  morph doesn't reach. `light` draws into the element's children, which the morph matches to the island's. A frame
-  that reaches the element without changing its props, such as the resync after a reconnect, removes what the
-  component drew. One that changes them is undone the other way: the component renders again with the children it
-  took in when it started, in place of those the island just sent. The page's classes don't reach into a shadow root,
-  so style the component in its render, and theme it with CSS custom properties, which do.
+- **A shadow root, not `light`.** The default mode, `open`, and `closed` draw into a shadow root, which Datastar's
+  morph of the island doesn't reach. `light` draws into the element's children, which the morph matches to the
+  island's. An island sent again without changing the element's props, such as in the resync after a reconnect,
+  removes what the component drew. One that changes them is undone the other way: the component renders again with
+  the children it took in when it started, in place of those the island just sent.
+- **Styled from inside.** The page's classes don't reach into a shadow root, so style the component in its render,
+  and theme it with CSS custom properties, which do.
 - **The island's children are slotted.** What the island renders in the element is in the page's DOM, styled by the
   page, shown through the component's `<slot>`, and patched as the rest of the island. Rocket rewrites the
   expressions in it for the component: `$$name` is the component's signal, and an `@action(...)` goes to the
   component first, which passes those it doesn't define to Datastar. An island's actions work there, as `@post`
   isn't the component's, but a component action named as one of Datastar's would take its calls.
-- **The `js` codec is code.** It makes functions of what an attribute holds, so a server value in such a prop is the
-  injection [Security](security.md) describes for expressions. Values go through the others, such as `json` and
-  `string`.
 - **Untested:** a component inside another's children. Rocket tells their children apart by a marker on each
   element, `data-rocket-host`, which the morph removes, as any attribute the island didn't render. A component's own
   children, the island's actions among them, don't need it.

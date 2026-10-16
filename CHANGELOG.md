@@ -17,6 +17,8 @@
   data: an `observe`'s namespace, position and arguments, or a shared state's instance, where a view had to parse the
   key's call site.
 - A session's resource summary includes holds acquired by the island reading it, even in its first render.
+- The README says how to install the `tropical` skill in Codex, Cursor and other agents that read Agent Skills, as
+  well as in Claude Code.
 
 ## 0.7.0 - 2026-10-15
 

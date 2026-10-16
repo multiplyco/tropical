@@ -30,7 +30,7 @@ them looks.
   [["/projects/:id" {:handler (ring/handler app)}]])
 
 
-;; Innermost first: the router, then what may refuse a page, then tropical's.
+;; Innermost first: the router, then what may refuse a page, then Tropical's.
 (def handler
   (-> (router routes)
     wrap-login
@@ -41,18 +41,18 @@ them looks.
 
 The keys, with the details in the docstrings of `co.multiply.tropical.ring` and `co.multiply.tropical.session`:
 
-| Key                  | What it is                                                                                     |
-|----------------------|------------------------------------------------------------------------------------------------|
-| `:root`              | `(fn [{:keys [tab uid request]}] call)`: the session's root island                             |
+| Key                  | What it is                                                                                    |
+|----------------------|-----------------------------------------------------------------------------------------------|
+| `:root`              | `(fn [{:keys [tab uid request]}] call)`: the session's root island                            |
 | `:page`              | `(fn [{:keys [tab frame scripts request]}] html)`: the page, from the session's first frame   |
-| `:revision`          | `(fn [request] revision)`: names what the page's head loads; optional                          |
+| `:revision`          | `(fn [request] revision)`: names what the page's head loads; optional                         |
 | `:open-when-hidden`  | true keeps each tab's stream open while its page is hidden, for browser automation; optional  |
-| `:uid`               | `(fn [request] uid)`: the user, or nil                                                         |
-| `:error-view`        | `(fn [failure] hiccup)`: what renders in place of an island that throws; optional              |
+| `:uid`               | `(fn [request] uid)`: the user, or nil                                                        |
+| `:error-view`        | `(fn [failure] hiccup)`: what renders in place of an island that throws; optional             |
 | `:first-frame-ms`    | how long a session's first frame may wait for reads still pending; 0 by default               |
-| `:compression`       | the encodings to compress the stream with, in order of preference; none by default             |
-| `:max-signals-bytes` | the largest action body read; 1 MiB by default                                                 |
-| `:stream-max-ms`     | how long a stream stays open before it reconnects, for stickiness that lapses; off by default  |
+| `:compression`       | the encodings to compress the stream with, in order of preference; none by default            |
+| `:max-signals-bytes` | the largest action body read; 1 MiB by default                                                |
+| `:stream-max-ms`     | how long a stream stays open before it reconnects, for stickiness that lapses; off by default |
 
 ## Mounting it
 
@@ -129,8 +129,7 @@ An app of many pages shares one map, and gives each route its own root:
 
 - **The app mounts in an element of the page's.** `(ring/mount :body attrs & children)` renders the element, such as
   the body, with the app's attributes, holding the session's first frame. Its attributes open the tab's stream, kept
-  open while the page is hidden if the app says `:open-when-hidden`, keep the state the browser owns
-  ([State the browser owns](browser-state.md)), and refuse files dropped outside a drop area. `children` go after the
+  open while the page is hidden if the app says `:open-when-hidden`, keep the state the browser owns ([State the browser owns](browser-state.md)), and refuse files dropped outside a drop area. `children` go after the
   first frame, outside the islands, such as a container for dialogs. The element's `data-init` opens the stream, so
   `attrs` can't have one, and a page mounts once.
 - **The head takes the islands' scripts.** `(ring/scripts nonce)` gives the script tags of the scripts the first
@@ -160,40 +159,27 @@ An app of many pages shares one map, and gives each route its own root:
 
 ## Failures
 
-An island whose render throws renders an error view in its place, and the rest of the page goes on. The failure is
-logged through `clojure.tools.logging`, with the exception and a reference made for it, such as `4KF7-Q2XM`. The
-default view says only that the island failed, with the reference, for the user to report: what it renders reaches the
-client, and an exception's message can carry what the user shouldn't see.
+An island whose render throws renders an error view in its place, and the rest of the page goes on. What the island
+does then, its own view, and the failure a view gets are in [Islands](islands.md#when-a-render-throws). What is the
+app's to decide is the view for every other island, and where the failures go.
 
-An island failing again the same way, the same exception class thrown from the same place, keeps its reference until
-it renders successfully or unmounts, however often it re-renders meanwhile, and its log lines share the reference.
-Repeats are logged without the stack trace, at doubling counts, and the end of the run with its count. A small
-cache per island definition shares recent stack traces across its instances for up to a minute; other runs' lines
-name the reference whose line has the trace. Each new run still gets a line. Error-view failures are tracked
-independently under the same reference, so suppressing a render's repeat cannot hide a new error in its view.
-
-The app's `:error-view`, `(fn [failure] hiccup)`, replaces the default, and an island's own, in `defisland`'s options,
-replaces the app's for that island:
-
-```clojure
-(defisland chart
-  {:error-view (fn [{:keys [ref]}] [:p "The chart couldn't be drawn. Reference " ref "."])}
-  [series]
-  ...)
-```
-
-- **The failure is a map:** the reference, `:ref`; the exception, `:error`; the island's qualified name, `:island`;
-  its id, `:path`, and its element's, `:element-id`; its `:args`; and the session's `{:tab :uid :request}`,
-  `:session`. A view that reports the failure elsewhere, such as to an error tracker, sends the reference along. The
-  library logs every failure whichever view renders it.
-- **A view that throws gives way:** an island's to the app's, and the app's to the default.
-- **What a render throws is the island's,** an `AssertionError` from `assert` or a `:pre` included, except what leaves
-  the JVM in no state to go on, such as running out of memory, which closes the session.
-- **A failed island is an island.** Its children unmount, and it renders again, as any island does, when its
-  arguments change or something it read before it threw does.
-
-A failure in a session's own loop, outside the islands' renders, closes the session and its stream, so the client
-reconnects into a new one.
+- **The app's view.** `:error-view`, `(fn [failure] hiccup)`, renders in place of an island without a view of its
+  own. Without it, the default says only that a part of the page failed, with the failure's reference: what a view
+  renders reaches the client, and an exception's message can carry what the user shouldn't see.
+- **Logged with a reference.** Each failure is logged through `clojure.tools.logging`, with the exception and a
+  reference made for it, such as `4KF7-Q2XM`, which the view gets as `:ref`, for the user to report. The library logs
+  every failure, whichever view renders it, so a view that reports the failure elsewhere, such as to an error
+  tracker, sends the reference along.
+- **Repeats share a reference.** An island failing again the same way, the same exception class thrown from the same
+  place, keeps its reference until it renders successfully or unmounts, however often it re-renders meanwhile, and
+  its log lines share the reference. Repeats are logged without the stack trace, at doubling counts, and the end of
+  the run with its count. A small cache per island definition shares recent stack traces across its instances for up
+  to a minute; other runs' lines name the reference whose line has the trace. Each new run still gets a line.
+  Error-view failures are tracked independently under the same reference, so suppressing a render's repeat cannot
+  hide a new error in its view.
+- **A failure outside the renders.** A failure in a session's own loop, outside the islands' renders, closes the
+  session and its stream, so the client reconnects into a new one. So does a render that leaves the JVM in no state to
+  go on, as running out of memory does.
 
 ## Names in the page
 
@@ -211,21 +197,22 @@ the app needs to find gets an id of its own.
 ## Compressing the stream
 
 With `:compression [:zstd :br :gzip]` in the app, each tab's stream is compressed with the first of those its request
-accepts, or not at all. One encoder lasts the stream's life, so a morph repeating what an earlier frame sent goes as a
-reference to it, and each frame is flushed through it at once, so the client decodes the frame as it arrives. A
-server's own compression can't do that for a response that never ends: Jetty's zstd and brotli hold what they are given
-until the response ends. The page and the actions are left to the server's compression.
+accepts, or not at all. One encoder lasts the stream's life, so an island sent again, which mostly repeats what an
+earlier frame sent, goes largely as a reference to it. Each frame is flushed through the encoder at once, so the
+client decodes the frame as it arrives. A server's own compression can't do that for a response that never ends:
+Jetty's zstd and brotli hold what they are given until the response ends. The page and the actions are left to the
+server's compression.
 
-- **The encoders.** gzip is the JDK's. zstd and brotli are tropical's: it ships libzstd and brotli's encoder,
+- **The encoders.** gzip is the JDK's. zstd and brotli are Tropical's: it ships libzstd and brotli's encoder,
   libbrotlienc, for macOS, and for Linux on x86-64 and aarch64, glibc or musl, and calls them through the JDK's foreign
   function API, so they can't conflict with a zstd-jni or brotli4j the app's dependencies bring. Elsewhere, the system
   properties `co.multiply.tropical.zstd.library` and `co.multiply.tropical.brotli.library` name a libzstd, 1.4 or
   later, and a libbrotlienc, 1.0 or later. An encoding the handler can't load fails its creation.
 - **Native access.** On JDK 24 and later, `--enable-native-access=ALL-UNNAMED` keeps the JDK from warning as they call
   native code.
-- **Memory.** The settings are tropical's: each open stream holds its encoder, about 0.7 MB with zstd, 0.9 MB with
+- **Memory.** The settings are Tropical's: each open stream holds its encoder, about 0.7 MB with zstd, 0.9 MB with
   brotli and 0.25 MB with gzip, whose shorter window can't refer back across a large island.
-- **BREACH.** A stream's size can leak a secret it carries: see [the design notes](design.md).
+- **BREACH.** A stream's size can leak a secret it carries: see [Security](security.md#compression).
 
 ## Running it
 
@@ -243,23 +230,25 @@ until the response ends. The page and the actions are left to the server's compr
   recovering it.
 - **A page that loaded what has changed reloads.** A rebuild patches the islands into the page the tab has, and what
   that page loaded outside them stays as it was: the head the app's `:page` rendered, such as the engine and the
-  stylesheet, the scripts its islands declared, and tropical's own code in the page. So a page carries a revision, which
+  stylesheet, the scripts its islands declared, and Tropical's own code in the page. So a page carries a revision, which
   its stream sends each time it connects, and a stream that reaches a server of another revision reloads the page,
   building no session. A deploy that changes what pages load reloads each open tab once; one that doesn't rebuilds
-  them in place. Tropical's part covers its own code and every script. The head is the app's to name, with
-  `:revision`, such as a digest of the URLs it loads, fingerprinted as they should be; without it, a changed head
-  shows once a tab is reloaded by hand. Name it alike on every server of a release, so not by when the server started:
-  a page whose stream finds another revision again just after it reloaded is rebuilt in place, with a warning.
+  them in place.
+- **The head's revision is the app's to name.** Tropical's part of the revision covers its own code and every script.
+  The head's is `:revision`, such as a digest of the URLs it loads, fingerprinted as they should be; without it, a
+  changed head shows once a tab is reloaded by hand. Name it alike on every server of a release, so not by when the
+  server started: a page whose stream finds another revision again just after it reloaded is rebuilt in place, with a
+  warning.
 - **Stickiness that lapses.** A tab whose stream stays open on one server makes no other request while it sits idle,
   so stickiness that lasts a fixed time, such as a cookie good for ten minutes, can lapse under it, and its next click
   goes elsewhere, which costs that click. Stickiness that lasts as long as a tab may stay open, hours, is the fix.
-  Where it can't, `:stream-max-ms` ends each stream after that long, and Datastar reconnects it at once, through the
-  balancer, to the same session, which sends only what changed meanwhile, as the page has the rest. Set under the
-  stickiness's life, it keeps an open tab on its server, if each request extends that life. A balancer can count it
-  from when it first set the cookie instead, even while setting the cookie again on every response. Then no request
-  extends it, so it lapses under a tab in use too, and only a long life helps.
-- **Heartbeats.** A dead connection is only noticed on write, so a quiet stream writes a heartbeat every 10 s
-  (`session/heartbeat-ms`): an SSE comment, which the client ignores, and which keeps the idle timeouts of proxies
+- **Or a stream that ends.** Where stickiness can't last that long, `:stream-max-ms` ends each stream after that long,
+  and Datastar reconnects it at once, through the balancer, to the same session, which sends only what changed
+  meanwhile, as the page has the rest. Set under the stickiness's life, it keeps an open tab on its server, if each
+  request extends that life. A balancer can count it from when it first set the cookie instead, even while setting
+  the cookie again on every response. Then no request extends it, so it lapses under a tab in use too, and only a long
+  life helps.
+- **Heartbeats.** A dead connection is only noticed on write, so a quiet stream writes a heartbeat every 10 s (`session/heartbeat-ms`): an SSE comment, which the client ignores, and which keeps the idle timeouts of proxies
   along the way from closing it.
 - **Hidden tabs.** Datastar closes a hidden tab's stream and opens it again when the tab is shown. Its session keeps
   its islands, and what they hold, for 15 s (`session/grace-ms`), then lets go of them. A tab shown within that gets

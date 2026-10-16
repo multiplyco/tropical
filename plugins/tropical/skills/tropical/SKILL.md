@@ -22,8 +22,8 @@ This file covers what you can't infer: where a reasonable guess from React, Elec
 wrong. It is not an API reference. The app-facing vars and namespaces carry thorough docstrings, so for signatures and
 options, read `(clojure.repl/doc co.multiply.tropical.hooks/observe)` rather than guessing. The guides have the long
 form of everything here, one per subject, at `https://github.com/multiplyco/tropical/blob/main/doc/<name>.md`:
-`islands`, `reading`, `actions`, `browser-state`, `shared-state`, `scripts`, `uploads`, `testing`, `serving`,
-`security` and `how-it-works`.
+`islands`, `reading`, `actions`, `browser-state`, `shared-state`, `scripts`, `rocket`, `uploads`, `testing`,
+`serving`, `security` and `how-it-works`.
 
 Resources and background work are [Quiescent](https://github.com/multiplyco/quiescent) tasks. If the `quiescent`
 skill is available, load it for those.
@@ -133,7 +133,8 @@ plain function returning hiccup, called inside islands.
   emit the state. It works from any thread, and does nothing once the resource has closed.
 - **Pending, then values, and failures throw.** `observe` returns `hooks/pending` until the first `emit!`
   (`hooks/pending?`). When `f` throws or its task fails, `observe` throws in the render: `try` handles it, and
-  uncaught, the island renders the error view. The next reader opens a new resource.
+  uncaught, the island renders the error view. The island keeps the failure until it unmounts or reads other `args`,
+  so it doesn't retry by itself; a reader arriving later opens a new resource.
 - **A read that depends on a read waits for it.** `pending` is a value, not a suspension as in Electric or an
   `await`: the render goes on with it. `observe` given `pending` itself returns `pending` and opens nothing, but a
   field of it is nil, so `(observe (:id user) …)` opens with nil, and `(use-shared s (:id user))` reads everyone's
@@ -165,8 +166,8 @@ plain function returning hiccup, called inside islands.
   latest render's. A positional key such as `[:pick i]` on a card paging through questions lets a click on the old
   render run the new render's handler. `[:pick question-id i]` doesn't. An action per rendered row, `[:remove id]`,
   needs no check that the id is one the user may remove: its token exists only for rows the server rendered.
-- **Signals are untrusted, and their keys are strings.** Validate them. Signals whose names start with `_` stay in the
-  browser and aren't sent.
+- **Signals are untrusted, and their keys are strings.** Validate them. Datastar doesn't send its local signals, those
+  under a key starting with `_`.
 - **What the handler returns:** nil (204), a map of signals for the page to patch, or `(action/navigate "/items/42")`,
   which opens that page as a page load. `navigate` takes only a path on the page's origin, so no handler becomes an
   open redirect; a page elsewhere, such as a sign-in provider's, takes `{:external true}` and an absolute URL the
@@ -187,14 +188,14 @@ plain function returning hiccup, called inside islands.
 
 ## Where state lives
 
-| Kind                                   | Use                              | Lives                                  | Server sees it                 |
-|----------------------------------------|----------------------------------|----------------------------------------|--------------------------------|
-| An island's own, server-side           | `use-state`                      | while the island is mounted            | yes                            |
+| Kind                                   | Use                                | Lives                                | Server sees it                 |
+|----------------------------------------|------------------------------------|--------------------------------------|--------------------------------|
+| An island's own, server-side           | `use-state`                        | while the island is mounted          | yes                            |
 | The page's own, browser-side           | a Datastar signal (`data-signals`) | until the page unloads               | when an action sends it        |
-| The browser's, rendered in first frame | `defcookie` + `use-cookie`       | across page loads, in a cookie         | at start; `observe` follows it |
-| The browser's, any size                | `defstorage` + `use-storage`     | across page loads, in `localStorage`   | when an action passes it       |
-| Shared across sessions                 | `defshared` + `use-shared`       | while read, then a linger; in memory   | yes                            |
-| Durable, or across servers             | a database, read with `observe`  | the database's                         | yes                            |
+| The browser's, rendered in first frame | `defcookie` + `use-cookie`         | across page loads, in a cookie       | at start; `observe` follows it |
+| The browser's, any size                | `defstorage` + `use-storage`       | across page loads, in `localStorage` | when an action passes it       |
+| Shared across sessions                 | `defshared` + `use-shared`         | while read, then a linger; in memory | yes                            |
+| Durable, or across servers             | a database, read with `observe`    | the database's                       | yes                            |
 
 - **Cookie states** (`co.multiply.tropical.cookie`) are for what the first frame must render right, such as whether a
   section is open: booleans, numbers and strings, about 3.5 KB in all. `ui/shown`, `ui/aria-expanded` and `ui/toggle`
@@ -209,7 +210,9 @@ plain function returning hiccup, called inside islands.
   server can render.
 - **Shared states** (`co.multiply.tropical.shared`) are keyed: a user's id makes one the user's, a document's id
   everyone's who has it open. Build the key from what the session vouches for, such as `use-session`'s `:uid`, never
-  from signals. `shared/swap!` changes one from anywhere. A restart loses it, and each server holds its own.
+  from signals. `shared/swap!` changes one from anywhere, under the instance's lock, so its fn should be quick. An
+  instance lives while an island reads it, then a linger: a `swap!` after that finds none, returns false, and the
+  value is dropped. A restart loses it, and each server holds its own.
 - **The page mounts the app with `(ring/mount :body attrs)`**, whose attributes keep cookie and storage states and
   guard drops. A page that builds its own body instead carries `ui/page-attrs` there; without it, cookie and storage
   changes are never written.
@@ -226,8 +229,9 @@ plain function returning hiccup, called inside islands.
 
 - **Datastar 1.0 syntax:** `data-on:click`, `data-bind`, `data-text`, `data-attr:name`, `data-signals`; signals are
   `$name` in expressions. An action is the expression `use-action` returns, placed in an event attribute.
-- **Islands own their DOM.** A render morphs an island's elements back to the server's, undoing what a script put
-  there. Draw into a web component's shadow root, or keep the morph off an element with `data-ignore-morph`.
+- **Islands own their DOM.** Each time an island is sent, Datastar morphs its elements back to the server's, undoing
+  what a script put there. Draw into a web component's shadow root, or keep the morph off an element with
+  `data-ignore-morph`.
 - **Scripts** are ES modules declared with `defscript` and taken up with `(script/use s)` in the islands that need
   them. The page loads each once, from the first frame that has it. `customElements.define` won't redefine a name,
   so a page reloads when its stream connects to a server on which a script has changed, as after a deploy.
@@ -236,7 +240,7 @@ plain function returning hiccup, called inside islands.
   `datastar-rocket.js` in place of `datastar.js`, never both, and components import `rocket` from that copy: name it
   in an import map, before the first module, with the nonce. Keep the default shadow-root mode: in `light` mode, the
   island's morph removes what the component drew, and the component undoes the island's children. A prop the
-  component sets is reset by the island's next render; state it owns goes in its `$$` signals, which a patch leaves,
+  component sets is reset when the island is next sent; state it owns goes in its `$$` signals, which a patch leaves,
   but which start over when the element is moved or replaced. Rocket routes every `@action(...)` in the island's
   children through the component, which passes on those it doesn't define. Never put a server value in a `js`-codec
   prop: it becomes code. The guide: `doc/rocket.md`.
@@ -283,8 +287,7 @@ plain function returning hiccup, called inside islands.
 - **Renders see the scope of the request that created the session**, fixed for its life. An action sees its own
   request's scope.
 - **An open stream isn't checked again.** Middleware that checks access runs when the stream connects. A user who
-  loses access while the page is open keeps its live updates until the stream reconnects. Read access in the islands
-  (`observe`), or close the user's sessions when it changes.
+  loses access while the page is open keeps its live updates until the stream reconnects. Read access in the islands (`observe`), or close the user's sessions when it changes.
 - **Signing out:** end the sign-in, then `(session/close-user! uid)`. The user's tabs reconnect, the middleware
   refuses them, and each page reloads into the app's answer. It closes only this JVM's sessions: on several servers,
   tell each, or have the root island read the user's standing from the database with `observe` and render
@@ -332,8 +335,8 @@ plain function returning hiccup, called inside islands.
   `:error`, ...).
 - Closing the harness unmounts everything: its resources linger, its tokens are revoked.
 - Renders run in the caller's scope: bind with `scoping` what the route's middleware would.
-- `:request` in the harness's options is the request that created the session, which `use-session` returns, and the
-  one `action/request` returns in a handler.
+- The harness's options: `:uid` (`"user"` by default), `:tab`, an `:error-view` as the app's, and `:request`, the
+  request that created the session, which `use-session` returns, and the one `action/request` returns in a handler.
 - A source the test shouldn't reach, such as a database read through the app's own function over `observe`: redefine
   that function with `with-redefs`.
 
@@ -357,6 +360,8 @@ plain function returning hiccup, called inside islands.
 - `ask` inside `observe`'s `f` → nothing bound: it runs in an empty scope. Read it in the render, pass it.
 - Slow work in a render → stalls the tab. Put it in `observe`.
 - Expecting every value from `emit!` → it keeps the latest. Emit state, not diffs.
+- Expecting an island whose read failed to recover on its own → it keeps the failure until it unmounts or its
+  `args` change.
 - An `id` on an island's root → the island fails.
 - Two siblings of one island without `:key` → the parent fails.
 - One hook key twice in a render, as two buttons with `use-action :go` → fails. Key each.
@@ -365,10 +370,14 @@ plain function returning hiccup, called inside islands.
 - A text input in an island that reads something that ticks → typing is morphed away. Split the island.
 - Live content under `ui/shown` → rendered and read while folded. Place it with `cookie/observe`.
 - A list's rows wrapped in elements, or a count in the list's island → every change resends the list.
-- A script drawing into an island's elements → undone by the next render.
+- A script drawing into an island's elements → undone when the island is next sent.
 - A positional action key (`[:pick i]`) → a stale click runs the new handler. Key by the subject.
 - Action signals trusted, or read with keyword keys → unvalidated input, and nil.
 - Expecting the view in the action's response → it comes over the stream.
+- A file input bound with Datastar's `data-bind` → its bytes go in signals as base64, refused past the action body's
+  cap (1 MiB by default). Use `use-uploads`.
+- `shared/swap!` on an instance no island reads → dropped, and it returns false. Shared state lives while read; what
+  must last goes in a database.
 - A task started in a render → belongs to the session, not the island, and outlives it. Use `observe` or
   `use-hold`.
 - A signal name, island id or script URL written by hand → breaks when names are digests. Use the helpers.

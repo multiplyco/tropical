@@ -12,5 +12,4 @@
   ["Serving pages" {:file "doc/serving.md"}]
   ["Security" {:file "doc/security.md"}]
   ["How it works" {:file "doc/how-it-works.md"}]
-  ["Design notes" {:file "doc/design.md"}]
   ["Changelog" {:file "CHANGELOG.md"}]]}

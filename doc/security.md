@@ -9,15 +9,15 @@ from here.
   its subscriptions are never opened, and its actions never exist. The gate is `if`, in the island that decides
   ([Islands](islands.md)).
 - **Actions are capabilities.** An action is an unguessable token, bound to the session's user, that exists while its
-  island renders it. A POST with another user's token gets a 403, and one with a token never minted, or revoked since,
-  a 404. The token travels in a header, which a cross-site form can't set, so a page elsewhere can't post an action
-  on the user's behalf ([Actions](actions.md), [design](design.md#actions)). It begins with its tab's id, which the
-  page already has, so a server that doesn't hold the tab can tell; its random part is what can't be guessed.
-- **A token outlives its island's last render by a moment.** It is revoked at the session's next render, so a request
-  can arrive just after the island stopped rendering the action. Writes that matter check again in the write path.
+  island renders it, and travels in a header, which a cross-site form can't set
+  ([Actions](actions.md#what-an-action-trusts), [design](design.md#actions)). The token begins with its tab's id,
+  which the page already has, so a server that doesn't hold the tab can tell; its random part is what can't be
+  guessed.
+- **A token outlives its island's last render by a moment,** until the session's next render. Writes that matter
+  check again in the write path.
 - **An action per thing acted on needs no check that the thing is allowed.** An action keyed `[:remove id]`, rendered
   per row, exists only for the rows the server rendered for this user. One action taking a value from the browser
-  vouches for less: the handler checks the value against what the island rendered.
+  vouches for less ([A value from the browser](actions.md#a-value-from-the-browser)).
 - **A tab is its user's.** A session belongs to the user whose request created it. A stream for another user's tab is
   refused, and its page reloads.
 - **The registry is every user's.** `(resource/use-summary)` lists every resource open on the server, with the
@@ -28,11 +28,12 @@ from here.
 
 Everything from the browser is the user's to change, whatever the page's script would send.
 
-- **Signals** arrive as JSON, with string keys: validate them as any request's parameters.
+- **Signals** arrive as JSON, with string keys: validate them as any request's parameters ([Actions](actions.md)).
 - **An action's value** (`:value`) is checked against what the island rendered, since no token vouches for it.
 - **Cookie states** are read from the request's cookie, or sent by the page to `cookie/observe`, and checked with the
   state's `:valid?`, falling back to its default ([State the browser owns](browser-state.md)).
-- **Storage states** come back through `storage/decode`, which returns nil unless the value passes `:valid?`.
+- **Storage states** come back through `storage/decode`, which returns nil unless the value passes `:valid?`, or
+  through `storage/observe`, where a value that doesn't reads as the default.
 - **An upload's arrival** is the browser's word. `:arrived` can check it, as with a HEAD on the stored object, and
   refuse it. The browser knows an upload by the id the island gave it, never by the app's reference, so it can't make
   the app take an object of its choosing, or another session's ([Files from the browser](uploads.md)).
@@ -60,8 +61,8 @@ Everything from the browser is the user's to change, whatever the page's script 
 - **Signing a user out.** End the sign-in, then `(session/close-user! uid)`. It closes the user's sessions: their
   islands unmount, their actions are revoked, and their streams end. Each tab reconnects about a second later
   through the route's middleware, which refuses a user no longer signed in, and the page reloads into the app's own
-  answer, such as its sign-in page (`ring/wrap-refused-streams`). In that order: a tab that reconnects before the
-  sign-in ends gets a fresh session. So does a request that passed the middleware before then, and creates its
+  answer, such as its sign-in page (`ring/wrap-refused-streams`). Keep that order: a tab that reconnects before the
+  sign-in has ended gets a fresh session, as does a request that passed the middleware before then and creates its
   session after the close.
 - **On several servers, each closes its own.** `close-user!` reaches the sessions of the JVM it runs in, so the app
   tells every server, over what they share. Or the root island follows the user's standing, read from where every
@@ -85,7 +86,7 @@ Everything from the browser is the user's to change, whatever the page's script 
 
 - **Text and attributes are escaped.** Chassis escapes the strings an island renders, in content and attribute values.
   HTML placed with `h/raw` is the app's to make safe.
-- **An expression is code.** A Datastar expression, in an `data-on:` or `data-attr:` attribute, runs as JavaScript.
+- **An expression is code.** A Datastar expression, in a `data-on:` or `data-attr:` attribute, runs as JavaScript.
   Escaping protects the attribute, not the JavaScript inside it, so a value spliced into an expression with `str` can
   become code. Build expressions from constants and the helpers' output (`use-action`, `ui/signal`, `ui/attr`). Data
   goes into the page as text or an attribute's value, and a value an expression needs goes in through `ui/json`, as a
@@ -100,9 +101,9 @@ Everything from the browser is the user's to change, whatever the page's script 
 - **The page doesn't show how the app is laid out.** Island ids, state signals and script URLs are digests of the
   app's names for them. They aren't secrets, since a name can be guessed and checked, but the page tells nothing of
   the app's namespaces, functions and states ([design](design.md#names-the-browser-sees)).
-- **A failed island says only that it failed.** The default error view shows no exception message, which can carry
-  what the user shouldn't see, only a reference made for the failure: random characters, which tell nothing of it. The
-  exception goes to the log, with the reference. What an app's or an island's own view renders reaches the client.
+- **A failed island says only that it failed.** The default error view shows a reference made for the failure,
+  random characters that tell nothing of it, and no exception message, which can carry what the user shouldn't see.
+  What an app's or an island's own view renders reaches the client ([Islands](islands.md#when-a-render-throws)).
 
 ## Compression
 

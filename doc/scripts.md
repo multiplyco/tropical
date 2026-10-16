@@ -14,20 +14,24 @@ Some of a page has to run in the browser: an outline that follows the reader as 
   [:nav [:page-outline]])
 ```
 
-- **Declared where it's used.** An island takes a script up with `script/use` during its render. The page loads it
-  from the first frame in which an island declares it: in the page's head if the first frame has it, or appended to it
-  over the stream when such an island is patched in, with the page's nonce, which Datastar gives patched script tags.
-  A module runs once per page, however many islands use it.
-- **Mounting.** Wrap the app in `ring/wrap-scripts`, outside the routes and the session middleware. It serves each
-  script under `/tropical/`, at a URL named by its var and the hash of its content, which browsers keep for good. The
-  page puts the first frame's scripts in its head with the CSP nonce: `[:head … (ring/scripts nonce)]`, or
+- **Declared where it's used.** `defscript` reads the module from a resource on the classpath, or takes its content as
+  `{:js string}`. An island takes it up with `script/use` during its render, which returns the script's URL, for an
+  expression that imports it. A module runs once per page, however many islands use it.
+- **Loaded with the first frame that declares it:** in the page's head if the first frame has it, or appended to the
+  head over the stream when such an island is patched in. Datastar gives a script tag that arrives in a patch the
+  page's nonce.
+- **Served outside the routes.** Wrap the app in `ring/wrap-scripts`, outside the routes and the session middleware.
+  It serves each script under `/tropical/`, at a URL named by its var and the hash of its content, which browsers keep
+  for good.
+- **The first frame's scripts go in the head, with the nonce:** `[:head … (ring/scripts nonce)]`, or
   `(script/tags scripts nonce)` given the `:scripts` its `:page` gets, and the stream doesn't send them again. A page
-  that leaves them out still gets them over the stream, a little later.
-  One that renders them without the nonce breaks them: a module blocked once stays failed for the page.
-- **Don't draw into the island.** The island's next render matches its elements' children to the server's, undoing
-  what a script put there. A web component draws into its shadow root, which the morph doesn't reach. One made with
-  Datastar's Rocket loads this way too ([Components with Rocket](rocket.md)).
+  that leaves them out still gets them over the stream, a little later. One that renders them without the nonce breaks
+  them: a module blocked once stays failed for the page.
+- **Don't draw into the island.** When the island is sent again, Datastar morphs its elements' children back to the
+  server's, undoing what a script put there. A web component draws into its shadow root, which the morph doesn't
+  reach. One made with Datastar's Rocket loads this way too ([Components with Rocket](rocket.md)).
 - **A page keeps what it loaded.** An edited script gets a new URL, but `customElements.define` won't redefine a name,
   and a module runs again beside the old one. So a page reloads when its stream connects to a server on which a script
   has changed since the page loaded: after a deploy that changes one, or in development, after `session/close-all!`
-  ([Serving](serving.md)). In development, a script whose resource is a file is read again when the file changes.
+  ([Reloading code in development](serving.md#reloading-code-in-development)). In development, a script whose
+  resource is a file is read again when the file changes.

@@ -62,7 +62,8 @@ Open the page in two or three tabs. The footer shows each patch's size next to t
 patched, and how often each has rendered. The **Server resources** card shows the subscription registry, across every
 session.
 
-1. **Share.** Two tabs on `alpha` share one subscription, opened once. A typical patch is about 190 chars against a 21 KB
+1. **Share.** Two tabs on `alpha` share one subscription, opened once. A typical patch is about 190 chars against a 21
+   KB
    page. Within each tab, the ticker reads the feed through two hooks of its own, the reading and its label, and the
    Server resources table shows one subscriber per tab.
 2. **Switch.** Pick `beta`. The ticker holds the new subscription and releases the old one, which lingers for 5 s, then
@@ -87,39 +88,36 @@ session.
    server follows its state, and places the table and its tabs only while they are shown (`cookie/observe`). Show it,
    and they arrive a round trip later.
 10. **Leave.** "Another topic" is an action that picks a topic on the server and opens its page. The topic route refuses
-   a topic that doesn't exist: on `/topic/gamma`, remove it from the REPL,
-   `(alter-var-root #'demo.state/topics dissoc "gamma")`, and close the sessions. The tab's stream reconnects, is
-   refused, and the tab reloads into the not-found page.
+    a topic that doesn't exist: on `/topic/gamma`, remove it from the REPL,
+    `(alter-var-root #'demo.state/topics dissoc "gamma")`, and close the sessions. The tab's stream reconnects, is
+    refused, and the tab reloads into the not-found page.
 11. **Follow.** With tabs on `/topic/alpha`, move its page from the REPL, `(demo.state/move! "alpha" "alpha-2")`. Every
-   tab goes to `/topic/alpha-2`, in place of its history entry, and a page loaded at the old URL is redirected there.
-   `(demo.state/move! "alpha" "alpha")` moves it back.
+    tab goes to `/topic/alpha-2`, in place of its history entry, and a page loaded at the old URL is redirected there.
+    `(demo.state/move! "alpha" "alpha")` moves it back.
 12. **Upload.** Pick files in the Uploads card, or drop them anywhere on the page. Each goes straight to a stand-in
-   bucket at a URL the island presigned, with its progress. Once none is on its way, those that arrived are taken in
-   together; a pick dropped while another is uploading joins its batch.
+    bucket at a URL the island presigned, with its progress. Once none is on its way, those that arrived are taken in
+    together; a pick dropped while another is uploading joins its batch.
 13. **Carry a choice.** "…with its summary hidden" opens the feed's topic on its page with the summary hidden, set by
-   the action before the page loads, in its first frame. On a topic's page, Hide and Show set it for every topic's
-   page, this one's at once.
+    the action before the page loads, in its first frame. On a topic's page, Hide and Show set it for every topic's
+    page, this one's at once.
 14. **Notify.** "Notify my tabs" shows a toast in every tab of yours, for 6 s, a state shared on the server per user.
-   "Another topic" posts one before it opens the page, and the page it opens shows it. The Server resources table
-   lists the toasts' instance with a subscriber per tab.
+    "Another topic" posts one before it opens the page, and the page it opens shows it. The Server resources table
+    lists the toasts' instance with a subscriber per tab.
 15. **Switch tabs.** The Server resources card's Registry, This tab and Counts tabs switch in the browser, on a local
-   signal, and stay as you left them while the card is patched with every change to the registry. Registry is every
-   resource open on the server, and This tab the ones this tab's islands read, with its own readers
-   (`resource/use-summary`). Post is enabled while the message has text, from the first paint (`ui/attr`).
+    signal, and stay as you left them while the card is patched with every change to the registry. Registry is every
+    resource open on the server, and This tab the ones this tab's islands read, with its own readers (`resource/use-summary`). Post is enabled while the message has text, from the first paint (`ui/attr`).
 16. **Suggest.** Suggest answers at once, and a moment later its suggestion lands in the message, sent from a background
-   task (`use-patch-signals`). Type over it: the composer renders again as the suggestion lands, or as you suggest
-   again, and leaves what you typed until the next one arrives.
+    task (`use-patch-signals`). Type over it: the composer renders again as the suggestion lands, or as you suggest
+    again, and leaves what you typed until the next one arrives.
 17. **Start over.** Click a term in the Raw HTML card, then "An example?", then another term. The definition is an
-   island keyed by its term, so the new one starts with its example hidden, and goes in the old one's place: the card,
-   and its passage, aren't sent.
+    island keyed by its term, so the new one starts with its example hidden, and goes in the old one's place: the card,
+    and its passage, aren't sent.
 18. **Keep a draft.** In the Drafts card, Rework a proposal, edit its sections, and pick a chip, which adds its line to
-   the note. Close the dialog, reload, or restart the server: the edits are still there, kept in the browser's storage
-   (`defstorage`), and the server stores none of them. Each row counts its draft's words on the server, which reads the
-   draft from the browser a moment after you stop typing (`storage/observe`). Start passes the draft to its action as a
-   value and drops it; Dismiss drops it while the dialog is closed. "Start, then open alpha" opens alpha's page, which
-   tells of it in a toast, and drops the draft before that page loads: back on `/`, the dialog shows the proposal as
-   it was.
+    the note. Close the dialog, reload, or restart the server: the edits are still there, kept in the browser's storage (`defstorage`), and the server stores none of them. Each row counts its draft's words on the server, which reads the
+    draft from the browser a moment after you stop typing (`storage/observe`). Start passes the draft to its action as a
+    value and drops it; Dismiss drops it while the dialog is closed. "Start, then open alpha" opens alpha's page, which
+    tells of it in a toast, and drops the draft before that page loads: back on `/`, the dialog shows the proposal as
+    it was.
 19. **Rate.** The stars in the Rocket card are a web component made with Datastar's Rocket, `<star-rating>`. Open its
-   breakdown, then rate in another tab: every tab's props change as the island is patched, and the breakdown stays
-   open, a signal of the component's own. "Clear it" is the island's action, in the component's children
-   ([Components with Rocket](rocket.md)).
+    breakdown, then rate in another tab: every tab's props change as the island is patched, and the breakdown stays
+    open, a signal of the component's own. "Clear it" is the island's action, in the component's children ([Components with Rocket](rocket.md)).

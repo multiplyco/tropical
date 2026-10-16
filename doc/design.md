@@ -1,9 +1,10 @@
 # Design
 
-Why Tropical is built the way it is. The README and the guides say what it does and how; this is the reasoning behind
-it, and the alternatives that were rejected. Measurements behind these claims are in [logbook.md](logbook.md).
+Why Tropical is built the way it is, for those working on it. The README and the guides say what it does and how, and
+an app needs nothing from here; this is the reasoning behind it, and the alternatives that were rejected. Measurements
+behind these claims are in [the logbook](logbook/README.md).
 
-## The two guarantees
+## The guarantees
 
 Tropical exists to keep two guarantees that Electric gives a Datastar application, without a reactive graph:
 
@@ -14,6 +15,9 @@ Tropical exists to keep two guarantees that Electric gives a Datastar applicatio
 - **Access control is scope-based.** A subtree the user may not see is never rendered, so its markup is never produced,
   its subscriptions never opened and its actions never minted. That is stronger than Electric, which ships gated code in
   the bundle and merely doesn't mount it.
+
+A third is Tropical's own: a failure stays in its island. A render that throws costs that island alone, and the page
+learns nothing from the exception ([Failures and logging](#failures-and-logging)).
 
 ## Immediate mode, not a reactive graph
 
@@ -81,7 +85,7 @@ and coalescing come from the runtime and the session pump instead, and are cover
   changed, so it is one pass in Java (`co.multiply.tropical.frame.Splice`) over both templates. It compares their
   strings as one text, across the holes left out, without joining them, and takes a child at the same place in both
   as kept without asking either slot map. At 1,000 rows it costs 61 µs, against 950 µs for the first version in
-  Clojure (logbook).
+  Clojure ([logbook](logbook/2026-10-08-lists-that-grow-send-what-they-gain.md)).
 
 ## Reading
 
@@ -139,12 +143,12 @@ and coalescing come from the runtime and the session pump instead, and are cover
   reads among it, or of what one session's islands hold, which shows nothing the page doesn't read. The session's view
   takes no bookkeeping: its islands hold the very value cells the registry's entries do, so the session matches its
   holds against the registry, on its own thread, and renders again as the registry changes, which it does whenever the
-  session gains or drops a read. Its own acquisitions in the current render count too: they may have opened before
-  the view subscribed to the registry, and a new island isn't yet in the session's instance table. Old holds count
-  until released after the render, which changes the registry again. A view per user, across a user's tabs, was set
-  aside: other sessions' holds are their threads' to read, so it would need the registry to count readers per session,
-  measured at a few hundred nanoseconds more per acquire and release (logbook, 2026-10-16), for a view no panel asked
-  for yet.
+  session gains or drops a read. Its own acquisitions in the current render count too: they may have opened before the
+  view subscribed to the registry, and a new island isn't yet in the session's instance table. Old holds count until
+  released after the render, which changes the registry again. A view per user, across a user's tabs, was set aside:
+  other sessions' holds are their threads' to read, so it would need the registry to count readers per session, measured
+  at a few hundred nanoseconds more per acquire and release ([logbook,
+  2026-10-16](logbook/2026-10-16-the-cost-of-counting-readers-per-session.md)), for a view no panel asked for yet.
 - **The linger.** Without it, every remount (a topic switched back, access granted again, a reconnect) would close and
   reopen a resource, and the churn would land on the database.
 - **Pending is a value, and a read given it waits.** A render reads `pending` and goes on, so the reads after it start
@@ -156,12 +160,12 @@ and coalescing come from the runtime and the session pump instead, and are cover
   by name, as Quiescent's `qlet` finds them, so reads that don't depend on each other still start together. It looks
   at values, not at calls to `observe`, so it works through an app's functions over `observe`, and over any value. The
   alternatives:
-  - Suspending at a pending read, as an `await` or React's Suspense does, gets a dependent read right by construction,
-    but starts the reads after it only once it lands: a waterfall within the island, and nothing to show beside it.
-  - A `pending` whose lookups return itself carries through `(:id user)` but not through `str` or `+`, and nothing in
-    the code shows where it stops.
-  - Rewriting the render into a graph of its reads, as Electric compiles a program, has to see every read, and an
-    app's reads are functions over `observe`, which a macro can't see into.
+    - Suspending at a pending read, as an `await` or React's Suspense does, gets a dependent read right by construction,
+      but starts the reads after it only once it lands: a waterfall within the island, and nothing to show beside it.
+    - A `pending` whose lookups return itself carries through `(:id user)` but not through `str` or `+`, and nothing in
+      the code shows where it stops.
+    - Rewriting the render into a graph of its reads, as Electric compiles a program, has to see every read, and an
+      app's reads are functions over `observe`, which a macro can't see into.
 
 ## Signals
 
@@ -185,12 +189,13 @@ Atoms remain the user-facing state: `RefSignal` gives each atom one watch, howev
   connection is too short-lived to own islands and their resources. A grace period absorbs reconnects.
 - **A hidden page's stream closes.** Datastar's default, kept: a stream per background tab would hold a connection, a
   session and, compressed, an encoder, for changes nobody sees, and a click needs a page that is shown. What an action
-  taken while hidden changed is sent when the page is shown again. The app's `:open-when-hidden` is for
-  development, where browser automation can drive a page its browser keeps hidden: there the closed stream made a click
-  right after a load look lost (logbook, 2026-10-09). A page left behind lets go of its stream all the same. Chrome
-  freezes a left page in its back/forward cache, `no-store` or not, where the stream holds its connection for about a
-  minute, and HTTP/1.1 allows six to a host: clicking from page to page, the sixth waited a minute. So with the option,
-  the stream is cancelled as the page is left, and opened again if the page is restored (logbook, 2026-10-10).
+  taken while hidden changed is sent when the page is shown again. The app's `:open-when-hidden` is for development,
+  where browser automation can drive a page its browser keeps hidden: there the closed stream made a click right after a
+  load look lost ([logbook, 2026-10-09](logbook/2026-10-09-a-click-soon-after-a-load-in-a-hidden-tab.md)). A page left
+  behind lets go of its stream all the same. Chrome freezes a left page in its back/forward cache, `no-store` or not,
+  where the stream holds its connection for about a minute, and HTTP/1.1 allows six to a host: clicking from page to
+  page, the sixth waited a minute. So with the option, the stream is cancelled as the page is left, and opened again if
+  the page is restored ([logbook, 2026-10-10](logbook/2026-10-10-a-page-left-behind-with-open-when-hidden.md)).
 - **One pump per session.** Rendering happens on the session's own virtual thread, never on the thread that made a
   change, so a shared subscription's loop never renders on anyone's behalf, and a slow session slows only itself.
 - **Coalescing, not queueing.** The latest state wins. A slow client gets fewer, later frames, never a backlog.
@@ -211,7 +216,7 @@ Atoms remain the user-facing state: `RefSignal` gives each atom one watch, howev
   Carrying the page's URL in a query parameter would have let the root route, but not the middleware run. Headers,
   not query parameters, keep the route's query the app's. Datastar cancels a request in flight when another goes to
   the same method and URL, which every action on a page now shares, so actions turn that off.
-- **The app's middleware asks tropical what a request is.** Middleware that runs before routing, refusing or parsing
+- **The app's middleware asks Tropical what a request is.** Middleware that runs before routing, refusing or parsing
   bodies, has to let actions through, and `request-kind` is the handler's own dispatch, so the two can't disagree. An
   action needs a JSON body as well as its header: the header is the client's to send, and a filter admitting any body
   that carries it would hand that body to the form and multipart parsers it exists to keep bodies from. Those ignore
@@ -229,7 +234,7 @@ Atoms remain the user-facing state: `RefSignal` gives each atom one watch, howev
   second, and a slow reload lets that retry out first. An open stream isn't asked again: what the page shows going
   away while it is open, access included, is for the islands to read and render.
 - **Signing out closes the sessions where they are.** `close-user!` closes the user's sessions in its own JVM, and
-  their reconnects meet the middleware, which refuses them. A session lives in one server's memory, and tropical has
+  their reconnects meet the middleware, which refuses them. A session lives in one server's memory, and Tropical has
   no channel between servers, nor wants one: an app on several already shares a database or a bus. The form that
   covers every server is a read: the root island follows the user's standing, where every server's sessions read it.
   It also covers a session created as the user signs out, which reads the standing as it renders, where a close
@@ -262,26 +267,26 @@ Atoms remain the user-facing state: `RefSignal` gives each atom one watch, howev
 - **A page that loaded what has changed reloads.** A rebuild patches the islands into the page the tab has, which
   keeps what the browser holds, and is why a deploy needn't reload open tabs. What the page loaded outside its islands
   isn't patched: the head the app rendered, such as the engine and the stylesheet; the scripts, whose components
-  `customElements.define` won't replace, and whose modules would run again beside the old ones; and tropical's own code
+  `customElements.define` won't replace, and whose modules would run again beside the old ones; and Tropical's own code
   in the page. New markup on an old head fails quietly, as an unstyled class or a dead component. So a page carries a
   revision, fixed as it renders, which its stream sends each time it connects, and a server of another revision
   reloads the page before it builds a session. A header, not a signal: Datastar sends signals with every action too,
   and they are the page's to change.
-  - Tropical's part is what it can see: its code in the page, rendered with fixed arguments, which follows the cookie
-    and storage states declared, and the version of every script. Every script, not the page's: those would have to
-    come from the browser, and Datastar sends a stream's headers as they were when it opened it on every retry, so a
-    script patched in later would be missing from the reconnect after a restart. Every script is coarse, as a deploy
-    that changes one reloads every tab, but sound: what a page loads after it renders comes from a server of its
-    revision, since a stream that reaches any other reloads it first. The browser could check each script tag the
-    stream appends against those it holds, which would be precise, but would reload while the user works, when an
-    island first needs the changed component, under a loop guard of its own.
-  - The app's part, `:revision`, names the head, which tropical can't see, nor digest from the page, where a nonce
-    differs per request. Revisions are compared, not ordered, so a server of the old one reloads a page of the new one
-    too: during a rolling deploy, the page then matches the server it reached. A page from before revisions sends
-    none, and reloads once.
-  - The reload sets the guard cookie a refused stream's does, and a page of another revision again, from a later
-    load within it, is rebuilt in place, with a warning, where a refusal gets a 204: servers that disagree on a
-    revision, as when it is a start time, would otherwise leave a page without its stream, worse than stale.
+    - Tropical's part is what it can see: its code in the page, rendered with fixed arguments, which follows the cookie
+      and storage states declared, and the version of every script. Every script, not the page's: those would have to
+      come from the browser, and Datastar sends a stream's headers as they were when it opened it on every retry, so a
+      script patched in later would be missing from the reconnect after a restart. Every script is coarse, as a deploy
+      that changes one reloads every tab, but sound: what a page loads after it renders comes from a server of its
+      revision, since a stream that reaches any other reloads it first. The browser could check each script tag the
+      stream appends against those it holds, which would be precise, but would reload while the user works, when an
+      island first needs the changed component, under a loop guard of its own.
+    - The app's part, `:revision`, names the head, which Tropical can't see, nor digest from the page, where a nonce
+      differs per request. Revisions are compared, not ordered, so a server of the old one reloads a page of the new one
+      too: during a rolling deploy, the page then matches the server it reached. A page from before revisions sends
+      none, and reloads once.
+    - The reload sets the guard cookie a refused stream's does, and a page of another revision again, from a later
+      load within it, is rebuilt in place, with a warning, where a refusal gets a 204: servers that disagree on a
+      revision, as when it is a start time, would otherwise leave a page without its stream, worse than stale.
 - **A failed pump closes its stream.** A session whose own loop throws is closed with its stream, so the client
   reconnects into a new session, instead of staying attached to one that will never send.
 - **Sync Ring streams by holding the thread.** A sync server ends a response once its body is written, so a sync
@@ -292,15 +297,16 @@ Atoms remain the user-facing state: `RefSignal` gives each atom one watch, howev
 ## The page
 
 The page is the app's, and the root island is the session's. The page renders once, and opens the stream that patches
-the islands, so what sets the session up can't live in an island: a patch morphs an island back to its render, and
-would strip the attributes that opened the stream. `ring/mount` is the session's part of the page: the element the app
-mounts in, holding the first frame, opening the stream and keeping the state the browser owns. It reads the tab and
-the frame from the page being rendered, as `ui/page-attrs` reads the page's user, so `:page` needs only its request,
-for what is the app's own: the head, its Datastar and the CSP nonce.
+the islands, so what sets the session up can't live in an island: Datastar morphs a patched island back to its
+render, and would strip the attributes that opened the stream. `ring/mount` is the session's part of the page: the
+element the app mounts in, holding the first frame, opening the stream and keeping the state the browser owns. It
+reads the tab and the frame from the page being rendered, as `ui/page-attrs` reads the page's user, so `:page` needs
+only its request, for what is the app's own: the head, its Datastar and the CSP nonce.
 
 - **The placeholder is the library's.** Without a first frame, the page holds an element with the root island's id,
   which a fresh session's root is patched into. The id is a digest of the root's name, so an id the app wrote by hand
-  never matched (logbook, 2026-10-10): `mount` takes it from `:root`.
+  never matched ([logbook, 2026-10-10](logbook/2026-10-10-a-placeholder-that-never-matched-its-root.md)): `mount` takes
+  it from `:root`.
 - **A page that can't update fails as it is served.** One that opens no stream would render, never update, and leave
   its session to wait out its grace, with nothing logged. One without `ui/page-attrs` works, so it is logged, once: an
   app with no state the browser owns and no drop areas loses only the drop guard.
@@ -399,7 +405,7 @@ of the default. A draft the user is writing is large, and the server needn't ren
   state is a word, where Datastar writes `true` as an empty value, which no state reads as true; the expression's
   booleans are turned into words in the browser, and a nil still removes the attribute, which `String(...)` would
   write as `"null"`. Text needs none of it: `data-text` sets the text again when a morph changes it, as `data-attr`
-  does an attribute (logbook, 2026-10-09).
+  does an attribute ([logbook, 2026-10-09](logbook/2026-10-09-what-a-morph-leaves-to-datastars-bindings.md)).
 - **A var is the identity.** `defcookie` and `defstorage` declare a state where the code using it lives, next to one
   island or in a namespace several share, decoupled from both the island tree and the app. Declared in the app map, a
   state sits far from the islands using it; declared on an island, as its `:key` is, a state can't be shared by an
@@ -427,7 +433,7 @@ of the default. A draft the user is writing is large, and the server needn't ren
   what the user changed; it drops states no longer declared, and the oldest values past a size well under the 4 KB a
   browser keeps. It is an arrow function taking no arguments, called with none: Datastar splits an expression that
   returns a value into statements at each `;` outside strings and such a function, and returns the last, so any other
-  shape is cut apart and fails to compile (logbook, 2026-10-08).
+  shape is cut apart and fails to compile ([logbook, 2026-10-08](logbook/2026-10-08-squint-spiked.md)).
 - **The cookie is the client's.** A value that isn't valid for its state, or isn't a boolean, a number or a string,
   reads as the default, whether the cookie holds it or `observe` is sent it.
 - **An action sets a state as a signal.** A handler returns a state's signals (`patch`), checked as it builds them:
@@ -475,11 +481,12 @@ of the default. A draft the user is writing is large, and the server needn't ren
   token is revoked, and the next send's 404 drops the watch. Its `pending` isn't a resource's, so the first frame
   doesn't wait for it: the browser can't answer before it has the page.
 - **Forgetting is a signal of its own.** Datastar deletes a signal patched to null without the patch event a handler
-  hears (logbook, 2026-10-09). So `forget` patches `_storageForget`, which the body's handler hears whether or not
-  anything on the page uses the entry: it drops the entry, sets a declared value back to its default, and clears the
-  signal, so the next forget is a change again.
+  hears ([logbook, 2026-10-09](logbook/2026-10-09-state-the-browser-keeps-in-its-storage.md)). So `forget` patches
+  `_storageForget`, which the body's handler hears whether or not anything on the page uses the entry: it drops the
+  entry, sets a declared value back to its default, and clears the signal, so the next forget is a change again.
 - **The user's own, and bounded.** An entry's key holds a digest of the session's user, so the id itself isn't in the
-  browser, and a page loaded for another user drops the entry. Clearing on sign-out would need Tropical to see sign-outs,
+  browser, and a page loaded for another user drops the entry. Clearing on sign-out would need Tropical to see
+  sign-outs,
   which are the app's. The same pass, as the page starts, drops entries older than their state's age, stored under
   another version, or of a state no longer declared; a write the storage has no room for drops the oldest first.
 - **JSON, not Transit.** The browser changes the value itself, in expressions and bindings, so it has to be one the
@@ -487,8 +494,9 @@ of the default. A draft the user is writing is large, and the server needn't ren
   default comes back as it went. A nil, which Datastar takes for deleting a signal, and a key holding a `.`, which it
   reads as a step, are refused.
 - **Expressions Datastar can't split.** The declaration is one expression without a `;`, and JSON in an expression
-  writes a backslash as `\u005c`: Datastar's statement pattern reads the end of `"a\\"` as an escaped quote, and
-  would go on to cut an expression at a `;` in a later string (logbook, 2026-10-09).
+  writes a backslash as `\u005c`: Datastar's statement pattern reads the end of `"a\\"` as an escaped quote, and would
+  go on to cut an expression at a `;` in a later string ([logbook,
+  2026-10-09](logbook/2026-10-09-state-the-browser-keeps-in-its-storage.md)).
 
 ## State shared on the server
 
@@ -519,7 +527,7 @@ already does: who still reads it, and when to drop it. So shared state takes tha
 
 Some of a page has to run in the browser, such as a web component that tracks scrolling. An island declares the script
 it needs, as it declares a signal, and the page loads it once, whether the island is in the first frame or patched in
-later (measurements in the logbook, 2026-10-08).
+later (measurements in the [logbook, 2026-10-08](logbook/2026-10-08-squint-spiked.md)).
 
 - **Modules, which the browser runs once.** A page keeps an ES module per URL for its life, so any number of tags for
   one URL run it once, and declaring a script needs no bookkeeping in the page. A classic script runs again for each
@@ -532,7 +540,7 @@ later (measurements in the logbook, 2026-10-08).
   alongside Datastar, and the stream sends them only to a page that didn't. Tropical doesn't render the page, so the
   helper records that it ran, as `mount` does; a page that left them out still works, its scripts loading once the
   stream connects. They went both ways before, which cost a second tag for each, for a module that runs once
-  (logbook, 2026-10-10).
+  ([logbook, 2026-10-10](logbook/2026-10-10-the-first-frames-scripts-twice.md)).
 - **A URL of its own, outside the routes.** Served under the page's URL, a script would be fetched again for each page
   that uses it, and pass the route's middleware. `wrap-scripts` serves it under one path, named by its var and the
   hash of its content, so it is kept for good and a change is a new URL. A page from before the change, asking for the
@@ -572,7 +580,7 @@ the server takes the files when it needs them.
   inside another needs no counting of the `dragenter` and `dragleave` each child fires, and only the area that would
   take a drop shows that it would. A drag that reaches the window is over no area. The page's body refuses it there,
   since the browser would open a dropped file in the tab, and clears what an area showed: `ui/page-attrs` carries that,
-  as it carries the browser's stores, since the document around the root island is the app's, and tropical renders from
+  as it carries the browser's stores, since the document around the root island is the app's, and Tropical renders from
   the root island down. An area is named by its uploads' token, so `drop-area` and `dropping` take the `start` that
   `use-uploads` returns, and two areas for one list are one area to `dropping`.
 - **The requests are an action's.** The description of the files and the reports post to the page's URL with a token
@@ -672,54 +680,57 @@ reading it, learns the app's layout from it.
 ## The wire
 
 - **Datastar's specification, not its server SDK.** The contract is Datastar's client and its SDK specification. What
-  tropical sends is small (two event types, an event id and a comment), so it implements them itself, pinned by tests
-  to the specification byte for byte. Owning the wire makes the stream's lifecycle the response body's own (attach, then hold
+  Tropical sends is small (two event types, an event id and a comment), so it implements them itself, pinned by tests
+  to the specification byte for byte. Owning the wire makes the stream's lifecycle the response body's own (attach, then
+  hold
   or return, then close), lets the heartbeat be an SSE comment that touches no client state, and keeps the write path
   free of garbage. The SDK it replaced was a release candidate trailing the client, and allocated about 10 KB per
   event.
 - **Transport in Java, vocabulary in Clojure.** `EventStream` guarantees whole, ordered events, a final close, and
-  closing on a failed write. `sse` says which events tropical sends and what they carry.
-- **JSON by Oda.** Signals go out as JSON and actions' signals come in as JSON, per event and per action. Oda writes
-  and parses straight on UTF-8 bytes with no dependencies, and is several times faster and lighter than the
-  alternatives measured (see the logbook). It needs JDK 25, which is tropical's floor.
+  closing on a failed write. `sse` says which events Tropical sends and what they carry.
+- **JSON by Oda.** Signals go out as JSON and actions' signals come in as JSON, per event and per action. Oda writes and
+  parses straight on UTF-8 bytes with no dependencies, and is several times faster and lighter than the alternatives
+  measured ([logbook](logbook/2026-10-07-json-oda-instead-of-charred.md)). It needs JDK 25, which is Tropical's floor.
 
 ## Compressing the stream
 
-- **In tropical, not the server.** A tab's stream is one response that never ends, written a frame at a time, and a
+- **In Tropical, not the server.** A tab's stream is one response that never ends, written a frame at a time, and a
   server's compressor can't encode it. Jetty 12.1's zstd and brotli encoders, read from their source, flush only at a
   response's last write, so the frames would wait in them until the stream ended; its gzip flushes on each flush only
   with sync flush turned on. Tropical knows where a frame ends, so it encodes the stream itself, flushes the encoder
   once per frame, and works the same on any Ring server. The page and the actions are responses that end, which a
   server's compression handles, and are left to it.
 - **One encoder for the stream's life.** What the stream sent stays in the encoder's window, so a frame repeating an
-  earlier one, as a morph of an island mostly repeats its last, is sent as a reference to it. On the demo's stream, a
+  earlier one, as an island sent again mostly repeats its last, is sent as a reference to it. On the demo's stream, a
   frame went from about 700 bytes to 43–52, whichever encoding. A 32 KB island re-sent with one row changed went to
   40 bytes with brotli and 140 with zstd, but 3.4 KB with gzip, whose 32 KiB window doesn't reach its last copy.
   Compressing each frame on its own would lose that, which is most of the gain.
 - **A frame is flushed once.** Its patches, inserts, removals and signals are written, then flushed together. Each
   flush ends a block of the encoding and costs bytes: a flush per event sent 6–8 % more on the demo's stream. An
   uncompressed stream writes less often for it too.
-- **The settings are tropical's.** Level, window and table sizes trade memory per open stream, and CPU per frame, for
-  how small a frame gets. They were picked by measuring streams of frames (see the logbook), and an app names only the
-  encodings, in its order. Exposing them would make each library's parameters part of tropical's API, and the level
-  gains little: the window is what pays. One budget for every encoding, gzip's 0.25 MB, was tried: windows that small
-  left zstd no better than gzip on a large island. If a deployment needs to spend less, the setting to add is memory
-  per stream, which tropical would map to each encoding.
-- **zstd's library is tropical's.** It was the app's at first, zstd-jni, as brotli's was. But an app whose
-  dependencies pin an older zstd-jni can't have a newer one beside it, and zstd-jni can't be shaded: its native
-  methods are bound by name to its package, 149 functions named after `com.github.luben.zstd`, with no registration
-  that a relocated class could use. A classloader of tropical's own could hold a second copy, but its jar would have to
-  sit outside the app's classpath, wherever the app is deployed. And the one pure-Java zstd at hand doesn't flush:
-  aircompressor's `ZstdOutputStream` holds everything until it closes. So tropical ships libzstd itself and calls it
-  through the JDK's foreign function API, which needs no glue code, only zstd's own library: built from zstd's signed
-  release source by `native/build-zstd.sh`, compression only, single-threaded, exporting zstd's API alone and binding
-  its own calls to itself. It needs nothing of libc but six memory functions, so one Linux build runs on glibc from
-  2.14 (2.17 on aarch64) and on musl. Its output is zstd-jni's, byte for byte, at the same version and settings. Each
-  write is copied into native memory, where zstd-jni pins the Java array for the call instead, which would hold off
-  the garbage collector for as long as a call compresses: about a tenth more CPU per frame (logbook).
-- **brotli's library is tropical's too.** It was the app's: brotli4j, added with an artifact per platform and reached by
+- **The settings are Tropical's.** Level, window and table sizes trade memory per open stream, and CPU per frame, for
+  how small a frame gets. They were picked by measuring streams of frames
+  ([logbook](logbook/2026-10-09-compressing-the-stream.md)), and an app names only the encodings, in its order. Exposing
+  them would make each library's parameters part of Tropical's API, and the level gains little: the window is what pays.
+  One budget for every encoding, gzip's 0.25 MB, was tried: windows that small left zstd no better than gzip on a large
+  island. If a deployment needs to spend less, the setting to add is memory per stream, which Tropical would map to each
+  encoding.
+- **zstd's library is Tropical's.** It was the app's at first, zstd-jni, as brotli's was. But an app whose dependencies
+  pin an older zstd-jni can't have a newer one beside it, and zstd-jni can't be shaded: its native methods are bound by
+  name to its package, 149 functions named after `com.github.luben.zstd`, with no registration that a relocated class
+  could use. A classloader of Tropical's own could hold a second copy, but its jar would have to sit outside the app's
+  classpath, wherever the app is deployed. And the one pure-Java zstd at hand doesn't flush: aircompressor's
+  `ZstdOutputStream` holds everything until it closes. So Tropical ships libzstd itself and calls it through the JDK's
+  foreign function API, which needs no glue code, only zstd's own library: built from zstd's signed release source by
+  `native/build-zstd.sh`, compression only, single-threaded, exporting zstd's API alone and binding its own calls to
+  itself. It needs nothing of libc but six memory functions, so one Linux build runs on glibc from 2.14 (2.17 on
+  aarch64) and on musl. Its output is zstd-jni's, byte for byte, at the same version and settings. Each write is copied
+  into native memory, where zstd-jni pins the Java array for the call instead, which would hold off the garbage
+  collector for as long as a call compresses: about a tenth more CPU per frame
+  ([logbook](logbook/2026-10-10-zstd-through-a-libzstd-of-tropicals-own.md)).
+- **brotli's library is Tropical's too.** It was the app's: brotli4j, added with an artifact per platform and reached by
   reflection. That left brotli open to what zstd-jni ran into, a brotli4j of another version among the app's
-  dependencies, and brotli4j builds no library for musl. So tropical ships brotli's encoder as it does libzstd, built by
+  dependencies, and brotli4j builds no library for musl. So Tropical ships brotli's encoder as it does libzstd, built by
   `native/build-brotli.sh` from brotli's release source: the encoder and the code it shares with the decoder, exporting
   brotli's API alone and binding its own calls to itself. Of libc it needs the six memory functions libzstd does and
   `exit`, and of libm `log2`, which glibc 2.29 gave a new version; the build binds the first, so the library runs on
@@ -730,7 +741,7 @@ reading it, learns the app's layout from it.
   built by none of them, and tracks at most 128 live allocations, unchecked outside debug builds. On Linux, malloc
   failing is rarer than the kernel ending the process for its memory.
 - **An encoding is loaded when the app names it.** The native libraries load when the handler is created, from the
-  encodings the app names, so an app that names none loads none. An encoding the app names that tropical can't load
+  encodings the app names, so an app that names none loads none. An encoding the app names that Tropical can't load
   fails the handler's creation, not the first stream.
 - **The request chooses among the app's.** A stream is encoded with the app's first encoding among those its request
   weighs highest, or not at all. zstd is in every engine now (Chrome 123, Firefox 126, Safari 26.3), brotli in every

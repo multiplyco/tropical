@@ -3,21 +3,23 @@
 Some state changes in the browser without a round trip, and outlasts a page load. Where the browser keeps it decides
 what the server knows of it, so each store has a namespace of its own:
 
-|                    | `co.multiply.tropical.cookie`                        | `co.multiply.tropical.storage`                       |
-|--------------------|------------------------------------------------------|------------------------------------------------------|
-| For                | whether a section is open, a sidebar folded          | a draft the user is writing                          |
-| Kept in            | a cookie                                             | `localStorage`                                       |
-| The server sees it | as the session begins, so it renders the first frame | when an action passes it, or an island reads it      |
-| An island reads it | from the first frame on, as it changes (`observe`)   | after the first frame, as it changes (`observe`)     |
-| Values             | booleans, numbers and strings, about 3.5 KB in all   | JSON, of any size                                    |
-| Sent               | with every request                                   | only as an action's value                            |
-| Per user           | no                                                   | yes                                                  |
-| Dropped            | the oldest first, past the cookie's size             | 30 days after it was last written, by default        |
+|                    | `co.multiply.tropical.cookie`                        | `co.multiply.tropical.storage`                   |
+|--------------------|------------------------------------------------------|--------------------------------------------------|
+| For                | whether a section is open, a sidebar folded          | a draft the user is writing                      |
+| Kept in            | a cookie                                             | `localStorage`                                   |
+| The server sees it | as the session begins, so it renders the first frame | when an action passes it, or an island reads it  |
+| An island reads it | from the first frame on, as it changes (`observe`)   | after the first frame, as it changes (`observe`) |
+| Values             | booleans, numbers and strings, about 3.5 KB in all   | JSON, of any size                                |
+| Sent               | with every request                                   | only as an action's value                        |
+| Per user           | no                                                   | yes                                              |
+| Dropped            | the oldest first, past the cookie's size             | 30 days after it was last written, by default    |
 
-Both keep a value in a Datastar signal, local to the page, which an island declares on its root, only if missing, so a
-later render, a patch or the island mounting again never undoes what the user did. Both give a handle for the helpers
-in `co.multiply.tropical.ui`. The element the app mounts in, `(ring/mount :body attrs)`, carries `ui/page-attrs`,
-whose handler writes each change into the store ([Serving pages](serving.md)).
+Both work the same way in the page:
+
+- **A state is a Datastar signal**, local to the page, which an island declares on its root only if it is missing (`data-signals__ifmissing`), so a later render, a patch or the island mounting again never undoes what the user did.
+- **The island gets a handle** for the helpers in `co.multiply.tropical.ui` ([The `ui` helpers](#the-ui-helpers)).
+- **The page writes each change into the store.** The element the app mounts in, `(ring/mount :body attrs)`, carries
+  `ui/page-attrs`, whose handler does it ([Serving pages](serving.md)).
 
 ## In a cookie
 
@@ -40,14 +42,14 @@ whose handler writes each change into the store ([Serving pages](serving.md)).
   with an item, such as a group's id, for one per item. Islands using one state follow one signal.
 - **Right in the first frame.** The server reads the cookie of the request that created the session, validated per
   state. `ui/shown` and `ui/aria-expanded` render the plain attribute from it, and bind it to the signal; `ui/signal`
-  gives the signal for expressions of your own, such as a pane's width in `data-style`. `cookie/value` is the session's
-  value, for the first paint only: the browser's may have moved on, so bind what must follow it, or read it with
-  `cookie/observe`.
+  gives the signal for expressions of your own, such as a pane's width in `data-style`.
+- **`cookie/value` is for the first paint only.** It is the session's value, and the browser's may have moved on
+  since, so bind what must follow it, or read it with `cookie/observe`.
 - **Kept whole across tabs.** The body's handler writes each change into the cookie, merged, so tabs don't undo one
   another. It keeps only values other than their default, and stays under 4 KB.
-- **Followed by the server where it renders from it.** `ui/shown` only hides: the server goes on rendering what the
-  element holds, and the islands in it go on reading. `(cookie/observe open)` is the page's value, for an island that
-  places it only while it is shown:
+- **Read when the server renders from it.** `ui/shown` only hides: the server goes on rendering what the element
+  holds, and the islands in it go on reading. `(cookie/observe open)` is the page's value, for an island that places
+  that content only while it is shown:
 
   ```clojure
   (let [open (use-cookie resources-open)]
@@ -59,14 +61,15 @@ whose handler writes each change into the store ([Serving pages](serving.md)).
 
   It is the session's value in the first frame, then the page's, which the browser sends as it changes, while the
   island reads it. A folded panel then reads nothing, and costs the server nothing. Shown again, the element shows at
-  once, and its content a round trip later, so keep what is cheap to keep live under `ui/shown` alone. It follows each
-  tab's own value: tabs share the cookie, but each session renders what its tab shows.
+  once, and its content a round trip later, so keep what is cheap to keep live under `ui/shown` alone. Each tab has
+  its own value: tabs share the cookie, but each session renders what its tab shows.
 - **Set by an action.** A handler returns `(cookie/patch [[group-open id false]])`, merged with its own signals: the
-  islands using the state follow, and the cookie keeps it, for an item the page doesn't render too. For the page it
-  opens, such as a new item's with a choice made before the item existed, it passes the same signals to `navigate`:
+  islands using the state follow, and the cookie keeps it, for an item the page doesn't render too. Values are checked
+  as the handler builds its result, and an invalid one throws.
+- **Set before a page it opens.** For a new item's page, with a choice made before the item existed, the handler
+  passes the same signals to `navigate`:
   `(action/navigate (str "/groups/" id) {:signals (cookie/patch [[group-open id false]])})` has the cookie written
-  before the page loads, so its first frame has them. Values are checked as the handler builds its result, and an
-  invalid one throws.
+  before the page loads, so its first frame has them.
 
 ## In the browser's storage
 
@@ -110,19 +113,24 @@ whose handler writes each change into the store ([Serving pages](serving.md)).
 - **The user's own, and bounded.** An entry's key holds a digest of the session's user, and a page loaded for another
   user drops it, as it drops entries older than the state's `:max-age-ms`, stored under another `:version` (change it
   when the values' shape changes), or of a state no longer declared. When the storage is full, the oldest go first.
-- **Set and dropped by an action.** A handler returns `(storage/patch [[edits id v]])` or `(storage/forget [[edits
-  id]])`, merged with its own signals, and the browser that made the action keeps or drops the entries, whether or not
-  the page uses them. An island using a forgotten entry goes back to the default it declared. An action that opens
-  another page passes them to `navigate`'s `:signals`, so a draft the action used up is gone before that page loads:
+- **Set and dropped by an action.** A handler returns `(storage/patch [[edits id v]])` or
+  `(storage/forget [[edits id]])`, merged with its own signals, and the browser that made the action keeps or drops
+  the entries, whether or not the page uses them. An island using a forgotten entry goes back to the default it
+  declared.
+- **Dropped before a page it opens.** An action that opens another page passes them to `navigate`'s `:signals`, so a
+  draft the action used up is gone before that page loads:
   `(action/navigate (str "/projects/" id) {:signals (storage/forget [[edits suggestion-id]])})`.
 
-## Over either
+## The `ui` helpers
+
+`ui/signal`, `ui/path`, `ui/toggle`, `ui/shown` and `ui/aria-expanded` take a handle of either store. `ui/attr`
+takes any expression, over the handles' signals or the page's own, and `ui/json` puts a value of the server's into one.
 
 - **Any attribute, over any expression.** `(ui/attr attrs k value expr)` is what `shown` and `aria-expanded` are built
-  on: the attribute `k` follows the Datastar expression `expr`, from a first paint showing `value`, the server's
-  reckoning of it, and stays as the browser has it when the island renders again. An `aria-*` state gets the words
-  `true` and `false`, where Datastar would leave a boolean's `true` empty, which counts as no state. Thread several onto
-  one element, rather than `merge` them, so each stays preserved:
+  on. The server renders `value`, its reckoning of the expression, for the first paint. Datastar then sets the
+  attribute `k` from the expression `expr`, and keeps it as the browser has it when the island is sent again (`data-attr`, `data-preserve-attr`). An `aria-*` state gets the words `true` and `false`, where Datastar would leave
+  a boolean's `true` empty, which counts as no state. Thread several onto one element, rather than `merge` them, so
+  each stays preserved:
 
   ```clojure
   [:button (-> {:role "tab" :data-on:click "$tab = 'files'"}
@@ -133,8 +141,8 @@ whose handler writes each change into the store ([Serving pages](serving.md)).
   ```
 
   Text that follows an expression needs no helper: `[:span {:data-text expr} first-paint-text]`, and Datastar puts the
-  browser's text back when a render changes it, before the page paints.
+  browser's text back when the island is sent again, before the page paints.
 - **A handle's signal.** `ui/signal` names it in an expression, `ui/path` in a `data-bind`, and `ui/toggle` flips a
   boolean one.
-- **A value of the server's, in an expression.** `ui/json` writes it as a JavaScript literal, `(str "$tab = " (ui/json
-  tab))`, where a value spliced in as it is written could become code ([Security](security.md)).
+- **A value of the server's, in an expression.** `ui/json` writes it as a JavaScript literal,
+  `(str "$tab = " (ui/json tab))`, where a value spliced in as it is written could become code ([Security](security.md)).

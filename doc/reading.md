@@ -15,32 +15,47 @@
       [:p (:value reading)])))
 ```
 
-- **Shared by call site and arguments.** Every session reading one call site with equal `args` shares one resource,
-  opened by the first reader and closed after the last leaves, once it has lingered. So `args` decide who shares it:
-  everything `f` depends on must be among them, and `f` may refer to no local of the render except through its params.
-  One that does fails to compile. Data that differs per user needs the user, or their account, among the `args`. Pass
-  values and stable references: `args` are compared with `=`, so a fresh closure would open a new resource each render.
+## Who shares a resource
+
+- **The call site and `args` are its key.** Every session reading one call site with equal `args` shares one resource.
+  So `args` decide who shares it: everything `f` depends on must be among them, and `f` may refer to no local of the
+  render except through its params. One that does fails to compile. Data that differs per user needs the user, or
+  their account, among the `args`.
+- **Pass values and stable references.** `args` are compared with `=`, so a fresh closure would open a new resource
+  each render.
 - **Read twice, held once.** The same call made again in one render, with equal `args`, returns the same value. So an
   app's own hook over `observe`, whose reads all share its call site, may be called by several hooks in one render,
   each asking its own question of the same data, over one resource. `use-shared` is the same for a state's instance.
-- **What `f` returns:** a fn, called once when the resource closes; or a
-  [Quiescent](https://github.com/multiplyco/quiescent) task, such as a poll loop's, cancelled when it closes, whose
-  failure fails the resource; or nil.
-- **Off the render.** `f` runs on a virtual thread of its own, so it may block while it connects. It runs in an empty
+- **Other `args`** release the old resource, which lingers, and hold the new one.
+
+## Opening one
+
+- **`f` runs off the render,** on a virtual thread of its own, so it may block while it connects. It runs in an empty
   scope, since the resource belongs to no single reader: read a scoped value in the render and pass it,
   `(observe (ask *account*) query-account)`.
+- **`f` returns what undoes it:** a fn, called once when the resource closes; or a
+  [Quiescent](https://github.com/multiplyco/quiescent) task, such as a poll loop's, cancelled when it closes, whose
+  failure fails the resource; or nil.
 - **`emit!` keeps the latest value.** A session renders whatever is current when it gets to it, so values in between
-  may never be seen. It may be called from any thread, and does nothing once the resource has closed.
-- **Pending and failure.** `observe` returns `hooks/pending` until the first value, which `hooks/pending?` tells
-  apart; a session's first frame can wait briefly for it (`:first-frame-ms`, in [Serving pages](serving.md)). It
-  throws in the render when `f` throws or its task fails, so `try` handles a failure; uncaught, the island renders the
-  error view. The failed resource is closed, and the next reader opens a new one.
-- **Other `args`** release the old resource, which lingers, and hold the new one.
-- **Given `pending`, pending.** If one of `args` is `pending`, `observe` returns `pending` and opens nothing, so a read
-  given another's value starts once that one has loaded.
+  may never be seen, and a diff sent through `emit!` may be lost: emit the state. It may be called from any thread,
+  and does nothing once the resource has closed.
 
-Reads of a shape of their own build on it: a function, whose one call site every caller shares, so its resources are
-keyed by its `args` alone, or a macro, which makes a call site at each use:
+## What a read returns
+
+- **`pending`, then the latest value.** `observe` returns `hooks/pending` until the first value, which
+  `hooks/pending?` tells apart. A session's first frame can wait briefly for it (`:first-frame-ms`, in
+  [Serving pages](serving.md)).
+- **A failure throws in the render.** When `f` throws or its task fails, `observe` throws its exception, so `try`
+  handles it; uncaught, the island renders its error view ([Islands](islands.md#when-a-render-throws)). The island
+  keeps the failure until it unmounts or reads other `args`, and a reader arriving after the failure opens a new
+  resource.
+- **Given `pending`, pending.** If one of `args` is `pending`, `observe` returns `pending` and opens nothing, so a read
+  given another's value starts once that one has loaded ([Reads that depend on reads](#reads-that-depend-on-reads)).
+
+## Reads of the app's own
+
+An app's own reads build on `observe`. A function has one call site, which every caller shares, so its resources are
+keyed by its `args` alone. A macro makes a call site at each use:
 
 ```clojure
 (defn <-
@@ -133,19 +148,16 @@ shows, as the error view or as data that isn't. A shared state's key taken from 
 
 - One physical resource per key, an `observe` call site and its `args`, opened by the first subscriber, however many
   sessions read it.
-- After the last subscriber leaves, it lingers for `linger-ms` (5 s) before closing. This absorbs remount churn:
-  switching back and forth, navigation, reconnects.
+- After the last subscriber leaves, it lingers for `resource/linger-ms` (5 s) before closing. This absorbs remount
+  churn: switching back and forth, navigation, reconnects.
 - A resource runs in a Quiescent task of its own, which belongs to the registry, not to whichever session opened it.
   Closing cancels the task, which calls the cleanup fn `f` returned, or cancels the task `f` returned. A cleanup fn
   returned after the resource closed is called as soon as it is returned.
-- A resource whose task fails is closed, its readers throw, and the next subscriber opens a new one.
-- A shared state's instance is a resource under a key of its own, its state and key. It opens holding the state's
-  `:init`, lingers for the state's `:linger-ms`, and changes by `shared/swap!`.
+- A resource whose task fails is closed, and the next subscriber opens a new one.
+- A shared state's instance lives the same way, under its state and key ([State shared on the server](shared-state.md)).
 - Closing doesn't wait for the old resource to tear down. A reader arriving just after a close opens a new one, while
   the old may still be closing: briefly, two connections to one source. A source that takes any number of readers
   doesn't mind; one that takes something exclusive, a lock or a sole consumer, may find it still held.
-- `(resource/summary)` lists the open resources, each with its state (`:connecting`, `:live` or
-  `:lingering`) and how many islands read it.
 
 ## Watching what is open
 
@@ -162,8 +174,7 @@ again as a resource opens, gains or loses a reader, lingers or closes, never as 
 ```
 
 - **`:server`, the default, is every resource open on this server**, each counting the islands that read it in any
-  session. Its rows are every user's reads, their arguments among them: show it only to whoever may see all of them
-  ([Security](security.md)).
+  session. Its rows are every user's reads, their arguments among them: show it only to whoever may see all of them ([Security](security.md)).
 - **`:session` is what this tab's islands read**, each counting those islands only. It shows nothing the page doesn't
   already read, so it suits a panel any user may open. A resource the tab lets go leaves it, though it may linger for
   other tabs.
@@ -173,4 +184,5 @@ again as a resource opens, gains or loses a reader, lingers or closes, never as 
   Tropical's. A macro of the app's over `observe` keeps its caller's position by passing its form's metadata on,
   ``(with-meta `(observe ...) (meta &form))``; a function's reads all have the function's own, and differ by `:args`.
 
-Both are for diagnostics: a view works the registry out again each time it changes, anywhere on the server.
+Both are for diagnostics: a view works the registry out again each time it changes, anywhere on the server. At the
+REPL, `(resource/summary)` gives the server's, once.
