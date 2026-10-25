@@ -89,24 +89,51 @@
 
 
 (deftest hooks-reading-the-same-thing-in-one-render-share-it
-  (reset! !opened [])
-  (with-redefs [resource/linger-ms 100]
-    (let [!show  (atom true)
-          both   (island/island-fn "both" nil
-                   (fn [] [:p (str (read-ten 4)) " " (str (read-ten 4)) " " (str (read-ten 5))]))
-          host   (island/island-fn "host" nil (fn [] [:div (when (use-watch !show) (both))]))
-          {:keys [step rt]} (harness host)]
-      (step)
-      (Thread/sleep 100)
-      (is (re-find #">40 40 50<" (island/html (step))) "the same read twice is one value")
-      (is (= [4 5] @!opened) "from one resource")
-      (is (= 1 (:subscribers (get (held) [4]))) "held once")
-      (testing "released once, when no render asks for it"
-        (reset! !show false)
-        (step)
-        (Thread/sleep 300)
-        (is (empty? (select-keys (held) [[4] [5]]))))
-      (runtime/dispose! rt))))
+  (doseq [order [[4 5] [5 4]]]
+    (testing (str "resources open in order " order)
+      (reset! !opened [])
+      (let [allow-open (zipmap [4 5] (repeatedly promise))
+            published  (zipmap [4 5] (repeatedly promise))
+            closed     (zipmap [4 5] (repeatedly promise))
+            !closed    (atom [])]
+        (with-redefs [resource/linger-ms 0
+                      times-ten (fn [emit! x]
+                                  @(allow-open x)
+                                  (swap! !opened conj x)
+                                  (emit! (* 10 x))
+                                  (deliver (published x) true)
+                                  (fn []
+                                    (swap! !closed conj x)
+                                    (deliver (closed x) true)))]
+          (let [!show  (atom true)
+                both   (island/island-fn "both" nil
+                         (fn [] [:p (str (read-ten 4)) " " (str (read-ten 4)) " " (str (read-ten 5))]))
+                host   (island/island-fn "host" nil (fn [] [:div (when (use-watch !show) (both))]))
+                {:keys [step rt]} (harness host)]
+            (try
+              (step)
+              ;; Independent subjects may start in either order. Wait for each
+              ;; publication before opening the next, without timing assumptions.
+              (doseq [x order]
+                (deliver (allow-open x) true)
+                (is (deref (published x) 2000 false) "the resource published"))
+              (is (re-find #">40 40 50<" (island/html (step))) "the same read twice is one value")
+              (is (= {4 1 5 1} (frequencies @!opened)) "one physical resource per argument")
+              (doseq [x [4 5]]
+                (is (= 1 (:subscribers (get (held) [x]))) "held once"))
+              (testing "released once, when no render asks for it"
+                (reset! !show false)
+                (step)
+                (doseq [x [4 5]]
+                  (is (deref (closed x) 2000 false) "the resource closed"))
+                (is (= {4 1 5 1} (frequencies @!closed)) "each cleanup ran once")
+                (is (empty? (select-keys (held) [[4] [5]]))))
+              (finally
+                (doseq [gate (vals allow-open)]
+                  (deliver gate true))
+                (runtime/dispose! rt)
+                (doseq [done (vals closed)]
+                  (deref done 2000 false))))))))))
 
 
 (deftest a-read-given-pending-is-pending-and-opens-nothing

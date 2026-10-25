@@ -86,3 +86,4 @@ same sitting rather than across entries.
 - 2026-10-16: [Ordering browser observations and counting the current render's
   holds](2026-10-16-ordering-browser-observations.md)
 - 2026-10-25: [Brotli 1.2.1](2026-10-25-brotli-1.2.1.md)
+- 2026-10-25: [Resource opening order in a test](2026-10-25-resource-opening-order-in-test.md)
