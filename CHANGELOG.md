@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Update the bundled Brotli encoder to 1.2.1. The decoder affected by CVE-2026-111497 is not part of Tropical's
+  native libraries; its Brotli compression was not affected.
+
 ## 0.8.0 - 2026-10-16
 
 - `cookie/observe` reads the page's value of a cookie state, for an island that renders from it: the session's value

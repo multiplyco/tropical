@@ -17,12 +17,12 @@
 # fails (BROTLI_ENCODER_EXIT_ON_OOM, its default).
 set -euo pipefail
 
-VERSION=1.2.0
+VERSION=1.2.1
 # GitHub's archive of the release tag. brotli publishes no signature: the
 # archive was checked, when this version was taken up, to be the release
-# commit, 028fb5a23661f123017c060daa546b55cf4bde29, its sources matching that
-# commit's trees, and those of brotli4j's copy of the same release.
-SHA256=816c96e8e8f193b40151dad7e8ff37b1221d019dbcb9c35cd3fadbfe6477dfec
+# commit, db24a98aed38a16de78cc05ca15cdd8dc2a0d92d, every archived file
+# matching that commit, with the omissions its export-ignore attributes name.
+SHA256=98d35d11a78dc453aebb7d10c3748f3f73ff78c8267c0dc697b8631f67bf7e8f
 # Debian 12 (bookworm-slim), each architecture's image.
 IMAGE_x86_64=debian@sha256:a4672c0cb26fbdde88e38fa2dfb6c681942306680e41e4378b28770b6e79ee91
 IMAGE_aarch64=debian@sha256:a1b86db52ce3daef089e45aabe36dfec4091f82464c25c1fdcf03de197cbe82a
