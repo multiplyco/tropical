@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.8.1 - 2026-10-25
 
 - Update the bundled Brotli encoder to 1.2.1. The decoder affected by CVE-2026-111497 is not part of Tropical's
   native libraries; its Brotli compression was not affected.
