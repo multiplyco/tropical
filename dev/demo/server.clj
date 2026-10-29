@@ -2,10 +2,13 @@
   "Jetty 12, as a production app would run it: sync handlers on virtual threads,
   and responses gzipped (Jetty leaves `text/event-stream` alone)."
   (:require
-    [ring.adapter.jetty9 :as jetty])
+    [co.multiply.quiescent :as q]
+    [ring.adapter.jetty :as jetty])
   (:import
+    [java.util.concurrent Executor]
     [org.eclipse.jetty.server Server]
-    [org.eclipse.jetty.server.handler.gzip GzipHandler]))
+    [org.eclipse.jetty.server.handler.gzip GzipHandler]
+    [org.eclipse.jetty.util.thread QueuedThreadPool]))
 
 
 (defonce !jetty-server (atom nil))
@@ -13,6 +16,12 @@
 
 (defn- add-gzip-handler!
   [^Server server]
+  (QueuedThreadPool/.setVirtualThreadsExecutor (Server/.getThreadPool server)
+    (reify Executor
+      (execute
+        [_ work]
+        (q/compel (q/task (Runnable/.run work)))
+        nil)))
   (Server/.setHandler server
     (doto (GzipHandler.)
       (GzipHandler/.setMinGzipSize 1024)
@@ -23,7 +32,9 @@
   [handler & {:as opts}]
   (let [opts (merge {:port             8080
                      :join?            false
-                     :virtual-threads? true
+                     :ws-idle-timeout  60000
+                     :ws-max-text-size (* 1024 1024)
+                     :ws-max-binary-size (+ 9 (* 1024 1024))
                      :configurator     add-gzip-handler!}
                opts)]
     (println "Starting server on port:" (:port opts))

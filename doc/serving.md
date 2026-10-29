@@ -53,6 +53,7 @@ The keys, with the details in the docstrings of `co.multiply.tropical.ring` and 
 | `:compression`       | the encodings to compress the stream with, in order of preference; none by default            |
 | `:max-signals-bytes` | the largest action body read; 1 MiB by default                                                |
 | `:stream-max-ms`     | how long a stream stays open before it reconnects, for stickiness that lapses; off by default |
+| `:channel-origin` | optional `(fn [request] public-http-origin)` for WebSocket Origin checks behind a proxy |
 
 ## Mounting it
 
@@ -85,6 +86,12 @@ The keys, with the details in the docstrings of `co.multiply.tropical.ring` and 
   the handler gets a 500. The handler reads at most `:max-signals-bytes` (1 MiB by default), and answers 413 to more.
 - **Scripts are served outside the routes.** `ring/wrap-scripts` serves the scripts islands declare, under
   `/tropical/`: wrap the app in it outside the routes and the session middleware ([Scripts the page needs](scripts.md)).
+
+Islands may also declare [bidirectional channels](channels.md). Their capability checks and upgrades pass through the same
+page route and middleware; `request-kind` reports `:channel-check` and `:channel`. These require a Ring adapter
+with WebSocket support. An established channel keeps its session alive when SSE disconnects, including while its tab is
+hidden. After socket loss it retains that session for its resume interval; the usual grace period follows once all
+transport holds have ended.
 
 ## Many pages
 
@@ -252,7 +259,8 @@ server's compression.
 - **Heartbeats.** A dead connection is only noticed on write, so a quiet stream writes a heartbeat every 10 s
   (`session/heartbeat-ms`): an SSE comment, which the client ignores, and which keeps the idle timeouts of proxies along
   the way from closing it.
-- **Hidden tabs.** Datastar closes a hidden tab's stream and opens it again when the tab is shown. Its session keeps
+- **Hidden tabs.** Datastar closes a hidden tab's stream and opens it again when the tab is shown. Without another
+  active transport ([WebSockets](channels.md)), its session keeps
   its islands, and what they hold, for 15 s (`session/grace-ms`), then lets go of them. A tab shown within that gets
   what changed while it was hidden; one shown after it gets a fresh session. `:open-when-hidden true` in the app keeps
   the stream open while hidden, for browser automation in development.

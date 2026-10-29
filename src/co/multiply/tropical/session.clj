@@ -6,7 +6,8 @@
   its first frame. The tab's stream (`ring/stream-init`) then attaches to it,
   and the session belongs to that page load from then on. Datastar drops that
   stream routinely: a hidden tab closes it, network blips retry it.
-  A detached session keeps its islands, and so their resources, for `grace-ms`.
+  A live WebSocket also holds its session. Once every transport is detached,
+  the session keeps its islands, and so their resources, for `grace-ms`.
   A reconnect within that window gets what the page lacks, without reopening
   anything: what changed since, if the last event id it read is the mark that
   followed what it was sent (`sse/mark!`), and otherwise the whole cached
@@ -86,7 +87,7 @@
 
 
 (def grace-ms
-  "How long, in ms, a session whose stream went away keeps its islands, and
+  "How long, in ms, a session whose last transport went away keeps its islands, and
   what they hold, for the tab to reconnect, before it closes."
   15000)
 
@@ -190,12 +191,14 @@
 
 (defn- close
   "Unmounts every island, releasing what they held, and ends the pump."
-  [{:keys [rt conn session] :as st}]
+  [{:keys [rt conn session transports] :as st}]
   (log/debug "Session closing:" (:tab session))
   (unregister! session)
   (when conn (close-stream! conn))
   (runtime/dispose! rt)
-  (assoc st :closed? true :conn nil))
+  (doseq [[_ end!] transports]
+    (try (end!) (catch Throwable t (log/warn t "Closing a session's transport failed."))))
+  (assoc st :closed? true :conn nil :transports {}))
 
 
 (defn- fail
@@ -213,6 +216,9 @@
     (case (first event)
       :attach (close-stream! (second event))
       :ssr (deliver (second event) nil)
+      :transport-attach (let [[_ _ end! accepted] event]
+                          (end!)
+                          (deliver accepted false))
       nil)))
 
 
@@ -224,6 +230,14 @@
     (case (if (vector? event) (first event) event)
       :close (close st)
       :ssr (assoc st :ssr (second event))
+      :transport-attach (let [[_ id end! accepted] event]
+                          (deliver accepted true)
+                          (assoc-in st [:transports id] end!))
+      :transport-detach (let [id (second event)]
+                          (if (contains? (:transports st) id)
+                            (cond-> (update st :transports dissoc id)
+                              (nil? (:conn st)) (assoc :detached-at (now)))
+                            st))
       ;; The page has the first frame's scripts in its head: don't send them.
       :scripts-in-page (update st :scripts #(max (long (or % 0)) (long (:ssr-scripts st 0))))
       :attach (let [[_ conn load last-id] event
@@ -408,15 +422,15 @@
 
 
 (defn- expire
-  [{:keys [conn detached-at closed?] :as st}]
-  (if (and (nil? conn) (not closed?) (< (+ detached-at (long grace-ms)) (now)))
+  [{:keys [conn transports detached-at closed?] :as st}]
+  (if (and (nil? conn) (empty? transports) (not closed?) (< (+ detached-at (long grace-ms)) (now)))
     (close st)
     st))
 
 
 (defn- wait-ms
-  [{:keys [conn detached-at hold-until recycle-at]}]
-  (cond-> (if conn
+  [{:keys [conn transports detached-at hold-until recycle-at]}]
+  (cond-> (if (or conn (seq transports))
             heartbeat-ms
             (max 1 (- (+ detached-at (long grace-ms)) (now))))
     hold-until (min (max 1 (- (long hold-until) (now))))
@@ -596,6 +610,24 @@
 (defn ^:no-doc detach!
   [session sse]
   (post! session [:detach sse]))
+
+
+(defn ^:no-doc attach-transport!
+  "Holds this session for a physical transport. Returns a promise of whether
+  it was admitted. `end!` closes it on explicit session closure. A declaration
+  alone must never hold a session. Paired with `detach-transport!`."
+  [session id end!]
+  (let [accepted (promise)]
+    (post! session [:transport-attach id end! accepted])
+    (when (realized? (:closed session))
+      (end!)
+      (deliver accepted false))
+    accepted))
+
+
+(defn ^:no-doc detach-transport!
+  [session id]
+  (post! session [:transport-detach id]))
 
 
 (defn ^:no-doc close!

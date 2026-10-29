@@ -124,3 +124,7 @@ session.
     breakdown, then rate in another tab: every tab's props change as the island is patched, and the breakdown stays
     open, a signal of the component's own. "Clear it" is the island's action, in the component's children ([Components
     with Rocket](rocket.md)).
+20. **Use a side channel.** In the Resumable channel card, send text and bytes with two tabs open: both receive the messages,
+    and the room's render count stays unchanged. Type a draft, then rerender the island or close its server session:
+    the component keeps the draft and history. Hide a tab for more than 15 s: its socket holds the session while SSE
+    is detached. Unmount the room to revoke its capability ([WebSockets](channels.md)).

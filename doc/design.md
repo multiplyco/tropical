@@ -679,6 +679,53 @@ reading it, learns the app's layout from it.
   Clojure apps already route, to SLF4J, Telemere or others, and exceptions go with their stack traces. A hook in the
   app map was the alternative: it fits a session's events, but not the resource registry's, which belong to no app.
 
+## Bidirectional channels
+
+A keyed declaration owns a logical channel; each generation owns a duplex endpoint and queues; successive
+sockets carry the same generation. The JVM endpoint implements core.async ReadPort, WritePort and Channel.
+Initialization runs once initially and again only when the peers cannot establish continuity. A generation
+identifier and ordered receipt positions distinguish resume from reset. On reset the old endpoint closes, and
+the application's whole processing task, including cleanup, finishes before new peer initialization. Old outgoing
+bytes never enter the new endpoint, and stale holders can only put to the closed old one.
+
+Messages use a nine-byte binary envelope carrying their original text/binary type and sequence number. Small JSON
+control frames establish the generation and exchange cumulative receipts and credit. Receipt acknowledges queue
+admission, so the sender retains bytes until the peer owns them. Lost acknowledgements cause retransmission,
+suppressed before application delivery. JVM credit returns on take, when ownership passes to application code;
+the browser callback helper returns credit after the handler settles. A small Java primitive implements bounded
+FIFO queues and monotonic receipt accounting. The core.async port layer commits handlers under their locks so
+losing alts operations neither consume input nor send cancelled output.
+
+Put completion establishes local admission. An explicit flush waits for receipt of committed puts, not durable
+storage. Full outgoing queues park producers and retain their exact bytes in FIFO order. Pending puts have their
+own byte/message budget, equal to the outbox limits, so nonblocking submissions cannot hide an unbounded buffer.
+The application submits in order but must not wait for a slow peer's outgoing capacity while holding a shared gate.
+
+The whole application callback runs under a compelled task. It can run its receive loop directly or return a task
+or completion channel. Readiness means input admission is available, rather than waiting for this task to finish.
+On unmount or permanent retirement Tropical closes both admissions, retains accepted input for reads through EOF,
+and discards outbound data. Pending puts complete as they are consumed into the discard sink; new puts return
+false. This preserves core.async's put meanings while avoiding its stranded-put trap when a consumer disappears.
+Closing a port does not prove processing is finished; the application's lifetime task provides that completion
+signal. Application failures are logged and retire the generation; recovery of failed processing belongs in the
+application's loop. The browser keeps its callback API and bounded outgoing drain on disposal.
+
+The earlier receive/cleanup callback interface forced applications with their own document machines to reconstruct
+a peer's lifetime across callbacks. The duplex endpoint lets them express it as a serial loop and finally cleanup.
+The core.async dependency buys interoperability with puts, takes, go and alts, while Tropical continues to own
+receipts, replay, bounded buffering and socket replacement. Resources needed by the loop must outlive it; an
+unrelated observation can own a subscription without owning the peer's processing machinery.
+
+A channel that has connected holds its session through a configurable resume interval after losing its socket.
+A declaration that never connected cannot hold its own session forever. While SSE retains the session, a channel
+can also survive a longer socket outage. In-memory queues cannot survive process destruction; such loss is an
+explicit reset, where the application resynchronizes its retained document. This is not a durable message broker.
+
+Checks and upgrades use the page route and authentication middleware. Origin is checked independently on each
+upgrade. The capability travels in a subprotocol rather than a URL. A missing session reopens SSE to find a new
+descriptor, and an unchanged descriptor is revalidated too. Neither stream recovery nor socket churn by itself
+resets the logical generation. The app-facing contract is in [Channels](channels.md).
+
 ## The wire
 
 - **Datastar's specification, not its server SDK.** The contract is Datastar's client and its SDK specification. What

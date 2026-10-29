@@ -110,6 +110,7 @@
     [co.multiply.tropical.sse :as sse]
     [co.multiply.tropical.storage :as storage]
     [co.multiply.tropical.ui :as ui]
+    [co.multiply.tropical.channel :as channel]
     [ring.core.protocols :as protocols]
     [s-exp.oda :as json])
   (:import
@@ -130,19 +131,23 @@
 
 
 (defn request-kind
-  "What `req` is to tropical's handler: `:page`, `:stream`, `:action`, or nil
+  "What `req` is to tropical's handler: `:page`, `:stream`, `:action`,
+  `:channel-check`, `:channel`, or nil
   for a request it refuses. The handler dispatches on it, so middleware that
   must tell tropical's requests apart before routing agrees with the handler.
 
   An action is a POST with a `Tropical-Action` header and a JSON body, which
   only the handler reads: a body parser that runs first leaves it nothing to
-  read (see `handler`). Ring's form and multipart parsers ignore JSON."
+  read (see `handler`). Ring's form and multipart parsers ignore JSON.
+  WebSocket checks are GETs with a Tropical-Channel header, and upgrades
+  are GETs with Upgrade: websocket; both use the page's own route."
   [req]
   (let [{:strs [tropical-tab tropical-action]} (:headers req)]
-    (case (:request-method req)
-      :get (if tropical-tab :stream :page)
-      :post (when (and tropical-action (json? req)) :action)
-      nil)))
+    (or (channel/request-kind req)
+      (case (:request-method req)
+        :get (if tropical-tab :stream :page)
+        :post (when (and tropical-action (json? req)) :action)
+        nil))))
 
 
 (defn- init-js
@@ -732,6 +737,7 @@
       (case kind
         :page (page-response app req uid)
         :stream (stream-response app req uid hold?)
+        (:channel :channel-check) (channel/response app req uid)
         :action (act-response app req uid))
       (if (= :stream kind)
         (refused-stream req nil)
@@ -741,8 +747,8 @@
 
 (defn handler
   "A Ring handler, sync or async, for a page's route, serving the page, its
-  stream and its actions for `app` (see the namespace docstring). Mount it for
-  GET and POST. It reads an action's body, its signals and any value, itself, and
+  stream, actions and declared WebSockets for `app` (see the namespace
+  docstring). Mount it for GET and POST. It reads an action's body, its signals and any value, itself, and
   refuses a body read before it, with a 500: middleware that parses or refuses
   bodies, on the route or before routing, lets actions past
   (`(= :action (request-kind req))`).
@@ -752,9 +758,13 @@
 
   Throws for an encoding in `:compression` it can't load, for a
   `:stream-max-ms` that isn't a positive number of ms, and for a `:revision`
-  that isn't a fn."
+  that isn't a fn. `:channel-origin`, if given, is a fn of the request
+  returning the public HTTP origin used to check WebSocket upgrades. Otherwise
+  the check uses Ring's scheme, server-name and server-port."
   [app]
   (some-> (:compression app) compression/check!)
+  (when-not (or (nil? (:channel-origin app)) (fn? (:channel-origin app)) (var? (:channel-origin app)))
+    (throw (IllegalArgumentException. ":channel-origin is a fn of the request returning the public HTTP origin.")))
   (when-not (or (nil? (:stream-max-ms app)) (pos-int? (:stream-max-ms app)))
     (throw (IllegalArgumentException.
              (str ":stream-max-ms is a positive number of ms, not " (pr-str (:stream-max-ms app)) "."))))

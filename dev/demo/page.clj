@@ -61,6 +61,7 @@
 
   The footer shows what each patch cost (`wire-stats`)."
   (:require
+    [demo.socket :as socket]
     [clojure.string :as str]
     [co.multiply.quiescent :as q]
     [co.multiply.tropical.action :as action :refer [use-action]]
@@ -900,6 +901,7 @@
       (rating-card uid)
       (drafts-card uid)
       (uploads-card)
+      (socket/card)
       (when (or (seq uploads) (seq batches))
         [:section {:class card}
          (heading "Dropped on the page" "Files dropped anywhere but on the uploads card, sent the same way.")

@@ -248,6 +248,32 @@ plain function returning hiccup, called inside islands.
   such as presigned PUTs: `use-uploads` asks the app where each file goes and keeps the list for the island.
   `(upload/drop-area attrs start)` makes an element a drop area, the innermost under the pointer taking a drag.
 
+For a component's own bidirectional protocol, `co.multiply.tropical.channel/use-channel` declares a keyed
+channel and returns a descriptor; `attrs` renders it on the custom element. Its JVM callback receives
+`{:channel endpoint :reason :initial|:continuity-lost :generation id}`. The endpoint implements core.async
+ReadPort, WritePort and Channel. Run the receive loop in the callback, or return its task/completion channel;
+include processing and finally cleanup in that lifetime. Do not start a detached loop and immediately return.
+Take until nil, processing serially when order matters. Resources needed by the loop must live through cleanup;
+an outer observe can stop its subscription independently but must not shut down those resources.
+
+Ordinary reconnects preserve the identical endpoint. Continuity loss closes it, waits for the old application's
+task including cleanup, then provides a fresh endpoint. Keep the document outside peer initialization and create
+fresh sync state for the replacement. Retirement preserves queued input through EOF, discards outbound data,
+and completes pending puts by draining them; new puts return false. A false reply put is not a reason to abandon
+remaining incoming messages. The task, rather than EOF observed elsewhere, proves processing is complete.
+
+Put completion means local admission; `put!` returning immediately is not its completion. Full outboxes park puts;
+pending submissions have a separate budget equal to the outbox's byte/message limits. `offer!` can refuse, and
+exceeding pending limits throws :backpressure. Retain refused bytes when generating them advances protocol state.
+Do not wait for outgoing capacity inside a shared document gate. `(channel/flush! endpoint)` waits for peer receipt
+of committed puts, not durability; await put completion first to include it. Each endpoint's message-size limit
+must fit its queued-byte limit, including defaults.
+
+The browser imports the descriptor's `module` and calls `mount(element, {open, status})`, disposing on true removal.
+Its callback API remains `{send, flush, reason, generation, signal}` -> `{receive, close?}`. Do not await remote
+replies or flush before returning those handlers. Strings and bytes keep their types; framing is internal.
+Traffic and status do not render islands. See `doc/channels.md` for lifetimes, limits and adapter requirements.
+
 ## Mounting
 
 ```clojure

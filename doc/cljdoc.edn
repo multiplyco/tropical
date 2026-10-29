@@ -8,6 +8,7 @@
   ["Scripts the page needs" {:file "doc/scripts.md"}]
   ["Components with Rocket" {:file "doc/rocket.md"}]
   ["Files from the browser" {:file "doc/uploads.md"}]
+  ["Bidirectional channels" {:file "doc/channels.md"}]
   ["Testing islands" {:file "doc/testing.md"}]
   ["Serving pages" {:file "doc/serving.md"}]
   ["Security" {:file "doc/security.md"}]

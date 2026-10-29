@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- Island-owned bidirectional channels (`co.multiply.tropical.channel/use-channel`) with opaque text and binary
+  messages. Queues, peer handlers and ordered delivery survive socket interruptions; acknowledgements, replay,
+  duplicate suppression and flow control are internal. JVM endpoints implement core.async ReadPort, WritePort
+  and Channel. Put completion establishes local admission; `flush!` waits for peer receipt. Traffic and status
+  never trigger rendering.
+- An initializer runs once per logical generation, with `:initial` or `:continuity-lost`. Reset drains accepted input
+  and waits for the application task, including cleanup, before providing a fresh endpoint. Accepted input remains
+  readable through EOF on unmount or revocation. Retired outgoing queues are discarded and pending puts released.
+- Established channels retain a session through temporary disconnection, with configurable retention. The demo
+  includes a shared room and uses Ring's Jetty adapter for binary support.
+
 ## 0.8.1 - 2026-10-25
 
 - Update the bundled Brotli encoder to 1.2.1. The decoder affected by CVE-2026-111497 is not part of Tropical's

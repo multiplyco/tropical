@@ -28,6 +28,13 @@ from here.
 
 ## What the browser sends
 
+- **Channels are capabilities too.** Each endpoint is bound to its page, user and session and revoked with its
+  island. Upgrades check Origin as well as the app's route middleware. An open connection does not re-run that
+  middleware for each message; access changes must revoke the declaration or session. Payloads remain untrusted,
+  opaque application input ([Channels](channels.md#limits-and-serving)).
+- **Channel revocation closes admission.** Accepted input remains readable through EOF. Apply any domain rules
+  for processing already accepted work in the application's loop ([Release and draining](channels.md#release-and-draining)).
+
 Everything from the browser is the user's to change, whatever the page's script would send.
 
 - **Signals** arrive as JSON, with string keys: validate them as any request's parameters ([Actions](actions.md)).
