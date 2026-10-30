@@ -24,7 +24,7 @@
      :chars (transduce (map count) + (transduce (map count) + htmls) (eduction cat inserted))}))
 
 
-(defn- selector
+(defn- island-selector
   "A CSS selector for the elements of the islands `ids`."
   [ids]
   (str/join ", " (map #(str "[id=\"" (model/element-id %) "\"]") ids)))
@@ -37,11 +37,11 @@
   [conn {:keys [morph insert] removed :remove} htmls inserted]
   (and (or (empty? morph) (sse/patch! conn htmls))
     (reduce (fn [_ [{:keys [mode target]} htmls]]
-              (or (sse/patch! conn htmls {:mode mode :selector (selector [target])})
+              (or (sse/patch! conn htmls {:mode mode :selector (island-selector [target])})
                 (reduced false)))
       true
       (map vector insert inserted))
-    (or (empty? removed) (sse/remove! conn (selector removed)))))
+    (or (empty? removed) (sse/remove! conn (island-selector removed)))))
 
 
 (defn send-frame!

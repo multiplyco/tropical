@@ -19,7 +19,7 @@ Three guarantees come with the rendering:
   reference, which the exception is logged under, so nothing the exception says reaches the browser.
 
 ```clojure
-co.multiply/tropical {:mvn/version "0.8.1"}
+co.multiply/tropical {:mvn/version "0.9.0"}
 ```
 
 Requires Clojure 1.12+ and JDK 25+. The wire follows Datastar's SDK specification, tested against the Datastar 1.0.4

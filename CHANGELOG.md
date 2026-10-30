@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.9.0 - 2026-10-30
 
 - Island-owned bidirectional channels (`co.multiply.tropical.channel/use-channel`) with opaque text and binary
   messages. Queues, peer handlers and ordered delivery survive socket interruptions; acknowledgements, replay,
@@ -12,6 +12,8 @@
   readable through EOF on unmount or revocation. Retired outgoing queues are discarded and pending puts released.
 - Established channels retain a session through temporary disconnection, with configurable retention. The demo
   includes a shared room and uses Ring's Jetty adapter for binary support.
+- Add core.async 1.9.865 and Ring's WebSocket protocols as library dependencies. Channels require an adapter
+  implementing Ring's `Socket` and `AsyncSocket` protocols; the integration tests use `ring/ring-jetty-adapter` 1.15.5.
 
 ## 0.8.1 - 2026-10-25
 
